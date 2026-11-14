@@ -910,3 +910,56 @@ describe('inside the Android app', () => {
         assert.equal(app.window.navigator.serviceWorker, undefined);
     });
 });
+
+describe('reacts to the world', () => {
+    const motion = (withGravity, without) => {
+        const ev = new app.window.Event('devicemotion');
+        Object.defineProperty(ev, 'accelerationIncludingGravity', { value: withGravity });
+        Object.defineProperty(ev, 'acceleration', { value: without || { x: 0, y: 0, z: 0 } });
+        app.window.dispatchEvent(ev);
+    };
+
+    test('tilting the phone turns gravity toward the low side', () => {
+        start({ storage: WELCOMED });
+        app.run('config.TILT = true; config.GRAVITY = 50');
+        app.frames(1);
+        // Upright: gravity reads +9.8 along the device's y axis, so "down" is straight down the screen
+        motion({ x: 0, y: 9.8, z: 0 });
+        app.frames(5);
+        let g = app.run('gravityVector()');
+        assert.ok(g.y < -100 && Math.abs(g.x) < 1, 'pulls down the screen: ' + JSON.stringify(g));
+        // Leaning the phone onto its right side: gravity now reads along +x
+        motion({ x: 9.8, y: 0, z: 0 });
+        app.frames(20);
+        g = app.run('gravityVector()');
+        assert.ok(g.x < -100 && Math.abs(g.y) < 20, 'pulls toward the right side, which is -x on screen: ' + JSON.stringify(g));
+        // Off: back to plain downward gravity
+        app.run('config.TILT = false');
+        assert.equal(app.run('JSON.stringify(gravityVector())'), '{"x":0,"y":-350}');
+        assert.deepEqual(app.errors, []);
+    });
+
+    test('a shake bursts color, once per shake', () => {
+        start({ storage: WELCOMED });
+        app.run('config.SHAKE_BURST = true');
+        app.frames(1);
+        motion({ x: 0, y: 9.8, z: 0 }, { x: 25, y: 0, z: 0 });
+        motion({ x: 0, y: 9.8, z: 0 }, { x: -25, y: 0, z: 0 });
+        motion({ x: 0, y: 9.8, z: 0 }, { x: 25, y: 0, z: 0 });
+        app.frames(1);
+        assert.equal(app.run('motion.bursts'), 1, 'one burst');
+        motion({ x: 0, y: 9.8, z: 0 }, { x: 25, y: 0, z: 0 });
+        app.frames(1);
+        assert.equal(app.run('motion.bursts'), 1, 'not again until the shake has settled');
+        app.frames(60);
+        assert.equal(app.run('motion.shakeArmed'), true, 'ready again once still');
+        app.run('config.SHAKE_BURST = false');
+        app.frames(1);
+        motion({ x: 0, y: 9.8, z: 0 }, { x: 25, y: 0, z: 0 });
+        motion({ x: 0, y: 9.8, z: 0 }, { x: -25, y: 0, z: 0 });
+        motion({ x: 0, y: 9.8, z: 0 }, { x: 25, y: 0, z: 0 });
+        app.frames(1);
+        assert.equal(app.run('motion.bursts'), 1, 'off means off');
+        assert.deepEqual(app.errors, []);
+    });
+});

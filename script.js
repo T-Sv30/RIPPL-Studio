@@ -207,6 +207,10 @@ let config = {
     BG_OPACITY: 100,
     SPLASHES: false,
     WALLPAPER_CLEAR: false,
+    // Reacts to: the world beyond your fingers
+    TILT: false,
+    TILT_STRENGTH: 50,
+    SHAKE_BURST: false,
 }
 
 
@@ -1038,6 +1042,110 @@ function releasePostFramebuffers () {
 }
 
 // Screen shake follows how hard you are stirring, with a little constant life
+// ---------- Tilt and shake ----------
+
+// The phone's motion sensor: which way is down on the screen, and how hard the phone is shaken
+const motion = {
+    listening: false,
+    has: false,          // a reading has arrived
+    upX: 0, upY: 1,      // smoothed "up" on the screen (the opposite of where gravity pulls)
+    rawX: 0, rawY: 1,    // the latest reading
+    amount: 0,           // 0 when the phone lies flat, 1 when it stands upright
+    shakeEnergy: 0,
+    shakeArmed: true,
+    bursts: 0,
+};
+
+function screenAngle () {
+    try {
+        if (window.screen && window.screen.orientation && typeof window.screen.orientation.angle === 'number') return window.screen.orientation.angle;
+        if (typeof window.orientation === 'number') return window.orientation;
+    } catch (e) { /* no orientation here */ }
+    return 0;
+}
+
+// Turns a reading in the device's own axes into screen axes (x right, y up)
+function toScreen (x, y) {
+    switch (((screenAngle() % 360) + 360) % 360) {
+        case 90: return [-y, x];
+        case 180: return [-x, -y];
+        case 270: return [y, -x];
+        default: return [x, y];
+    }
+}
+
+function onDeviceMotion (e) {
+    const g = e.accelerationIncludingGravity;
+    if (g && typeof g.x === 'number' && typeof g.y === 'number') {
+        const [sx, sy] = toScreen(g.x, g.y);
+        const len = Math.hypot(sx, sy);
+        motion.amount = Math.min(1, len / 9.8);
+        if (len > 0.5) {
+            // Gravity reads as an upward push on the sensor, so the reading itself points up the screen
+            motion.rawX = sx / len;
+            motion.rawY = sy / len;
+            if (!motion.has) { motion.upX = motion.rawX; motion.upY = motion.rawY; }
+            motion.has = true;
+        }
+    }
+    const a = e.acceleration;
+    if (a && typeof a.x === 'number') {
+        const jolt = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
+        if (jolt > 14) motion.shakeEnergy += jolt;
+    }
+}
+
+function wantsMotion () {
+    return !!(config.TILT || config.SHAKE_BURST) && !config.PAUSED;
+}
+
+function syncMotionListener () {
+    const want = wantsMotion();
+    if (want === motion.listening) return;
+    motion.listening = want;
+    if (want) window.addEventListener('devicemotion', onDeviceMotion);
+    else window.removeEventListener('devicemotion', onDeviceMotion);
+}
+
+// Some browsers (iOS) only hand out motion readings after the user agrees
+function askForMotion () {
+    try {
+        const DM = window.DeviceMotionEvent;
+        if (DM && typeof DM.requestPermission === 'function') DM.requestPermission().catch(() => {});
+    } catch (e) { /* nothing to ask */ }
+}
+
+function updateMotion (dt) {
+    syncMotionListener();
+    if (motion.has) {
+        const k = 1 - Math.exp(-dt * 6);
+        motion.upX += (motion.rawX - motion.upX) * k;
+        motion.upY += (motion.rawY - motion.upY) * k;
+    }
+    motion.shakeEnergy *= Math.exp(-3 * dt);
+    if (motion.shakeEnergy < 5) motion.shakeArmed = true;
+    if (config.SHAKE_BURST && motion.shakeArmed && motion.shakeEnergy > 30) {
+        motion.shakeArmed = false;
+        motion.bursts++;
+        splatStack.push(8 + Math.floor(Math.random() * 8));
+    }
+}
+
+// The force of gravity and buoyancy on the colored fluid, as a direction on the screen
+function gravityVector () {
+    const buoyancy = (config.BUOYANCY - 50) / 50 * 700;
+    let pull = config.GRAVITY / 100 * 700;
+    let upX = 0, upY = 1;
+    if (config.TILT && motion.has) {
+        pull += config.TILT_STRENGTH / 100 * 700 * motion.amount;
+        const len = Math.hypot(motion.upX, motion.upY) || 1;
+        upX = motion.upX / len;
+        upY = motion.upY / len;
+    }
+    const force = buoyancy - pull;
+    return { x: upX * force || 0, y: upY * force || 0 };
+}
+
 function updateShake (dt) {
     let motion = 0;
     pointers.forEach(p => {
@@ -3546,6 +3654,10 @@ const HELP = {
     TRANSPARENT: 'Saves images without a background, for use over other pictures.',
     SPLASHES: 'Drops a few gentle splashes every couple of seconds, so the screen is never still.',
     WALLPAPER_CLEAR: 'Clears the fluid and starts with new splashes each time you return to the app.',
+    // Scene: reacts to
+    TILT: 'Gravity follows the way you hold the phone, so color pours toward the low side.',
+    TILT_STRENGTH: 'How hard the tilt pulls, on top of the Gravity setting.',
+    SHAKE_BURST: 'A firm shake of the phone sets off a burst of color.',
 };
 
 // Descriptions of individual choices; the one for the current choice is shown under the control
@@ -3751,6 +3863,13 @@ function buildTabs () {
         ...shownIf(on('KALEIDOSCOPE'), [
             ctl.select('KALEIDO_SEGMENTS', 'Segments', SEGMENT_CHOICES, null, { chips: true }),
         ]),
+    ];
+
+    const reacts = [
+        ctl.heading('Tilt and shake'),
+        ctl.toggle('TILT', 'Tilt sets gravity', v => { if (v) askForMotion(); }),
+        ...shownIf(on('TILT'), [ctl.slider('TILT_STRENGTH', 'Tilt strength')]),
+        ctl.toggle('SHAKE_BURST', 'Shake for a burst', v => { if (v) askForMotion(); }),
     ];
 
     const touch = [
@@ -4032,6 +4151,7 @@ function buildTabs () {
         { id: 'scene', label: 'Scene', icon: 'scene', sections: [
             { id: 'scene', label: 'Scene', controls: scene, help: 'What is happening on screen.' },
             { id: 'touch', label: 'Touch', controls: touch, help: 'What your fingers do to the fluid.' },
+            { id: 'reacts', label: 'Reacts to', controls: reacts, help: 'What the fluid reacts to besides your fingers.' },
         ] },
         { id: 'color', label: 'Color', icon: 'palette', sections: [
             { id: 'palette', label: 'Palette', controls: palette, help: 'The colors the fluid is painted with.' },
@@ -5140,7 +5260,7 @@ const forcesShader = compileShader(gl.FRAGMENT_SHADER, `
     uniform float flowSpeed;
     uniform float swirl;
     uniform float turbulence;
-    uniform float buoyancy;
+    uniform vec2 gravity;
     uniform float elasticity;
     uniform float edgeMode;
     uniform float cornerMode;
@@ -5218,8 +5338,8 @@ const forcesShader = compileShader(gl.FRAGMENT_SHADER, `
             v += c * turbulence * dt;
         }
 
-        // Gravity and buoyancy act on the colored fluid
-        v.y += buoyancy * w * dt;
+        // Gravity and buoyancy act on the colored fluid, along whichever way is down
+        v += gravity * w * dt;
 
         // Force fields
         if (fieldMode > 0.5) {
@@ -5955,6 +6075,7 @@ function update (timestamp) {
         initFramebuffers();
     updateTextTexture();
     updateWallpaper(dt);
+    updateMotion(dt);
     recordHistory(frameSeconds);
     updateColors(dt);
     updatePalette(dt);
@@ -6147,7 +6268,8 @@ function applyForces (dt) {
         gl.uniform1f(u.flowSpeed, config.FLOW_SPEED / 100 * 450);
         gl.uniform1f(u.swirl, config.SWIRL / 100 * 900);
         gl.uniform1f(u.turbulence, config.TURBULENCE / 100 * 160);
-        gl.uniform1f(u.buoyancy, (config.BUOYANCY - 50) / 50 * 700 - config.GRAVITY / 100 * 700);
+        const g = gravityVector();
+        gl.uniform2f(u.gravity, g.x, g.y);
         gl.uniform1f(u.elasticity, config.ELASTICITY / 100 * 80);
         gl.uniform1f(u.edgeMode, edgeMode);
         gl.uniform1f(u.cornerMode, CORNER_MODES.indexOf(config.CORNER));
