@@ -217,6 +217,10 @@ let config = {
     TILT: false,
     TILT_STRENGTH: 50,
     SHAKE_BURST: false,
+    TIME_OF_DAY: false,
+    FOLLOW_THEME: false,
+    WAKE_RIPPLE: false,
+    BATTERY_TINT: false,
 }
 
 
@@ -326,8 +330,17 @@ function updatePalette (dt) {
 
 function samplePalette (u) {
     const to = paletteColor(paletteTo, u);
-    if (paletteMix >= 1) return to;
-    return lerpColor(paletteColor(paletteFrom, u), to, smooth01(paletteMix));
+    const base = paletteMix >= 1 ? to : lerpColor(paletteColor(paletteFrom, u), to, smooth01(paletteMix));
+    return tintColor(base, u);
+}
+
+// The time of day and the battery can pull the colors toward another palette (see "Reacts to")
+function tintColor (color, u) {
+    let c = color;
+    [daylight, battery].forEach(t => {
+        if (t.mix > 0 && t.palette) c = lerpColor(c, paletteColor(t.palette, u), t.mix);
+    });
+    return c;
 }
 
 // Blacklight: push every color to full saturation and extra brightness
@@ -551,6 +564,15 @@ function backgroundTarget () {
         top = bottom = normalizeColor(config.BACK_COLOR);
         glow = { r: 0, g: 0, b: 0 };
     }
+    const toward = (name, mix) => {
+        const b = BACKGROUNDS[name];
+        if (!b || mix <= 0) return;
+        top = lerpColor(top, hexToRGB(b[0]), mix);
+        bottom = lerpColor(bottom, hexToRGB(b[1]), mix);
+        glow = lerpColor(glow, hexToRGB(b[2]), mix);
+    };
+    toward(daylight.background, daylight.mix);
+    toward('Paper', theme.mix);
     if (config.BLACKLIGHT) {
         const I = config.BLACKLIGHT_INTENSITY / 100;
         const f = 0.3 + 0.65 * I;
@@ -1048,6 +1070,95 @@ function releasePostFramebuffers () {
 }
 
 // Screen shake follows how hard you are stirring, with a little constant life
+// ---------- Time of day, theme, and what the phone is doing ----------
+
+// A tint drifts toward a target palette and strength; to change palette it fades out first
+function driftTint (t, target, dt) {
+    const want = target && target.mix > 0 ? target : null;
+    const k = 1 - Math.exp(-dt * 0.5);
+    if (want && t.palette !== want.palette && t.mix > 0.02) {
+        t.mix -= t.mix * k;
+        return;
+    }
+    if (want) t.palette = want.palette;
+    const goal = want ? want.mix : 0;
+    t.mix += (goal - t.mix) * k;
+    if (Math.abs(t.mix - goal) < 0.005) t.mix = goal;
+}
+
+const daylight = { palette: null, background: null, mix: 0, hourOverride: null };
+
+// Dawn and dusk warm the picture, night cools it, and the middle of the day is the look itself
+function daylightPhase (hour) {
+    if (hour < 5.5 || hour >= 21) return { palette: 'Galaxy', background: 'Midnight', mix: 0.6 };
+    if (hour < 8.5) return { palette: 'Sunset', background: 'Ember', mix: 0.55 };
+    if (hour < 17) return { palette: null, background: null, mix: 0 };
+    return { palette: 'Gold', background: 'Nebula', mix: 0.5 };
+}
+
+function updateDaylight (dt) {
+    let target = null;
+    if (config.TIME_OF_DAY) {
+        const now = new Date();
+        const hour = daylight.hourOverride != null ? daylight.hourOverride : now.getHours() + now.getMinutes() / 60;
+        target = daylightPhase(hour);
+        if (target.mix > 0 && daylight.background !== target.background && daylight.mix <= 0.02) daylight.background = target.background;
+        if (target.mix > 0 && daylight.background !== target.background) target = { palette: daylight.palette, mix: 0 };
+    }
+    driftTint(daylight, target, dt);
+}
+
+const theme = { light: false, mix: 0, timer: 0 };
+
+function updateTheme (dt) {
+    theme.timer -= dt;
+    if (theme.timer <= 0) {
+        theme.timer = 1;
+        try { theme.light = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches); } catch (e) { theme.light = false; }
+    }
+    const goal = config.FOLLOW_THEME && theme.light ? 1 : 0;
+    theme.mix += (goal - theme.mix) * (1 - Math.exp(-dt * 0.5));
+    if (Math.abs(theme.mix - goal) < 0.005) theme.mix = goal;
+}
+
+const events = { ripples: 0 };
+const battery = { has: false, level: 1, charging: false, palette: null, mix: 0 };
+
+// A ring of color spreading from the middle, for the screen waking or the charger going in
+function wakeRipple () {
+    if (!config.WAKE_RIPPLE || config.PAUSED) return;
+    events.ripples++;
+    const color = generateColor();
+    const count = 12;
+    for (let i = 0; i < count; i++) {
+        const a = (i / count) * Math.PI * 2;
+        const c = { r: color.r * 10, g: color.g * 10, b: color.b * 10 };
+        emitSplat(0.5 + Math.cos(a) * 0.08, 0.5 + Math.sin(a) * 0.08, Math.cos(a) * 900, Math.sin(a) * 900, c, 0.8);
+    }
+}
+
+function watchBattery () {
+    if (!navigator.getBattery) return;
+    navigator.getBattery().then(m => {
+        const sync = () => { battery.has = true; battery.level = m.level; battery.charging = m.charging; };
+        sync();
+        m.addEventListener('levelchange', sync);
+        m.addEventListener('chargingchange', () => { sync(); if (battery.charging) wakeRipple(); });
+    }).catch(() => { /* no battery to watch */ });
+}
+
+// Nearly flat pulls the colors toward fire; charging pulls them toward green
+function batteryTint () {
+    if (!config.BATTERY_TINT || !battery.has) return null;
+    if (battery.charging) return { palette: 'Forest', mix: 0.45 };
+    if (battery.level < 0.3) return { palette: 'Fire', mix: 0.75 * (0.3 - battery.level) / 0.3 };
+    return null;
+}
+
+function updateBattery (dt) {
+    driftTint(battery, batteryTint(), dt);
+}
+
 // ---------- Sound ----------
 
 // What the microphone hears, boiled down to a few numbers the fluid can follow
@@ -3124,6 +3235,7 @@ if (WALLPAPER_MODE) {
             wallpaperPage.hidden = !visible;
             if (!visible) { closeSound(); return; }
             applyWallpaperLook();
+            wakeRipple();
             if (wallpaperPage.stopped) {
                 wallpaperPage.stopped = false;
                 lastUpdateTime = null;
@@ -3146,10 +3258,12 @@ function updateWallpaper (dt) {
 }
 
 document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && config.WALLPAPER_CLEAR && dye) {
+    if (document.visibilityState !== 'visible') return;
+    if (config.WALLPAPER_CLEAR && dye) {
         clearFluid();
         splatStack.push(4 + Math.floor(Math.random() * 4));
     }
+    wakeRipple();
 });
 
 function copyText (text) {
@@ -3562,6 +3676,7 @@ function loadDeviceSettings () {
     }
     platform.setHaptics(deviceSettings.HAPTICS);
     if (deviceSettings.KEEP_AWAKE) platform.keepAwake(true);
+    watchBattery();
     deviceStore.saved = deviceSnapshot();
     if (recentGraphicsResets().length >= GFX_RESETS_SAFE) {
         applySafeDeviceSettings();
@@ -3771,6 +3886,10 @@ const HELP = {
     TILT: 'Gravity follows the way you hold the phone, so color pours toward the low side.',
     TILT_STRENGTH: 'How hard the tilt pulls, on top of the Gravity setting.',
     SHAKE_BURST: 'A firm shake of the phone sets off a burst of color.',
+    TIME_OF_DAY: 'Dawn and dusk warm the colors, night cools them, and the middle of the day is the look itself.',
+    FOLLOW_THEME: 'Uses a paper-light background while the device is in light mode.',
+    WAKE_RIPPLE: 'A ring of color spreads from the middle when the screen wakes or the charger goes in.',
+    BATTERY_TINT: 'A nearly flat battery warms the colors toward fire; charging pulls them toward green.',
 };
 
 // Descriptions of individual choices; the one for the current choice is shown under the control
@@ -3992,6 +4111,12 @@ function buildTabs () {
         ctl.toggle('TILT', 'Tilt sets gravity', v => { if (v) askForMotion(); }),
         ...shownIf(on('TILT'), [ctl.slider('TILT_STRENGTH', 'Tilt strength')]),
         ctl.toggle('SHAKE_BURST', 'Shake for a burst', v => { if (v) askForMotion(); }),
+        ctl.heading('Time of day'),
+        ctl.toggle('TIME_OF_DAY', 'Follow the time of day'),
+        ctl.toggle('FOLLOW_THEME', 'Lighter in light mode'),
+        ctl.heading('Phone'),
+        ctl.toggle('WAKE_RIPPLE', 'Ripple when the screen wakes'),
+        ctl.toggle('BATTERY_TINT', 'Colors follow the battery'),
     ];
 
     const touch = [
@@ -6203,6 +6328,9 @@ function update (timestamp) {
     updateWallpaper(dt);
     updateMotion(dt);
     updateSound(dt);
+    updateDaylight(dt);
+    updateTheme(dt);
+    updateBattery(dt);
     recordHistory(frameSeconds);
     updateColors(dt);
     updatePalette(dt);

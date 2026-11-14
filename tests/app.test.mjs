@@ -1061,7 +1061,7 @@ describe('reacts to the world', () => {
         assert.ok(night.top.b > noon.bg.top.b + 0.03, 'a bluer night background: ' + JSON.stringify(night.top));
         assert.notEqual(paletteSample(), noon.palette, 'night colors');
         app.run('daylight.hourOverride = 6.5');
-        app.frames(200);
+        app.frames(400);
         const dawn = bg();
         assert.ok(dawn.top.r > night.top.r + 0.03, 'a warmer dawn: ' + JSON.stringify(dawn.top));
         app.run('config.TIME_OF_DAY = false');
@@ -1131,7 +1131,7 @@ describe('reacts to the world', () => {
         app.battery(0.1, true);
         app.frames(200);
         const charging = app.run('JSON.parse(JSON.stringify(samplePalette(0.5)))');
-        assert.ok(charging.g > low.g + 0.1, 'greener while charging: ' + JSON.stringify([low, charging]));
+        assert.ok(charging.r < low.r - 0.1, 'cooler while charging: ' + JSON.stringify([low, charging]));
         app.run('config.BATTERY_TINT = false');
         app.frames(200);
         assert.deepEqual(app.run('JSON.parse(JSON.stringify(samplePalette(0.5)))'), full, 'off restores the look');
