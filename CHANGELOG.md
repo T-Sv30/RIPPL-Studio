@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.4
 
 ### Changes
 - **Live wallpaper on Android**: System > Capture > "Set as live wallpaper" puts the look on
