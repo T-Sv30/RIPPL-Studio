@@ -19,7 +19,6 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import androidx.core.content.ContextCompat;
 import androidx.webkit.WebViewAssetLoader;
 import java.io.ByteArrayInputStream;
 
@@ -179,8 +178,7 @@ public class RipplWallpaperService extends WallpaperService {
             public void onPermissionRequest(PermissionRequest request) {
                 String[] wanted = request.getResources();
                 boolean microphoneOnly = wanted.length == 1 && PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(wanted[0]);
-                boolean granted = ContextCompat.checkSelfPermission(RipplWallpaperService.this, Manifest.permission.RECORD_AUDIO)
-                        == PackageManager.PERMISSION_GRANTED;
+                boolean granted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
                 if (microphoneOnly && granted) {
                     request.grant(wanted);
                 } else {
