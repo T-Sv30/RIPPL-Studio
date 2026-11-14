@@ -24,7 +24,7 @@ SOFTWARE.
 
 'use strict';
 
-const APP_VERSION = '1.0.3';
+const APP_VERSION = '1.0.4';
 
 const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
