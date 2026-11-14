@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.3
 
 ### Changes
 - **A new app icon**: a glowing swirl of blue and orange fluid replaces the droplet, on the home
