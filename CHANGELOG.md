@@ -10,6 +10,12 @@
   desktop background", which makes a link to the current look for wallpaper apps that show web
   pages (for example Lively Wallpaper on Windows or Plash on a Mac).
 
+## 1.0.3
+
+### Changes
+- **A new app icon**: a glowing swirl of blue and orange fluid replaces the droplet, on the home
+  screen, in the browser and on the store listing.
+
 ## 1.0.2
 
 ### Changes
