@@ -1,7 +1,9 @@
 package io.github.tsv30.ripplstudio;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Presentation;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
@@ -10,11 +12,14 @@ import android.service.wallpaper.WallpaperService;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
+import android.webkit.PermissionRequest;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import androidx.core.content.ContextCompat;
 import androidx.webkit.WebViewAssetLoader;
 import java.io.ByteArrayInputStream;
 
@@ -121,6 +126,7 @@ public class RipplWallpaperService extends WallpaperService {
                 settings.setAllowFileAccess(false);
                 settings.setAllowContentAccess(false);
                 web.setWebViewClient(new BundledPages());
+                web.setWebChromeClient(new MicrophoneOnly());
 
                 presentation.setContentView(web);
                 presentation.show();
@@ -161,6 +167,25 @@ public class RipplWallpaperService extends WallpaperService {
             if (web != null && pageReady) {
                 web.evaluateJavascript(
                         "window.RipplWallpaper && window.RipplWallpaper.setVisible(" + visible + ")", null);
+            }
+        }
+
+        /**
+         * The page may listen to the microphone (for "Sound reactive"), and only if the user has
+         * already granted the app that permission: a wallpaper can't ask. Everything else is refused.
+         */
+        private class MicrophoneOnly extends WebChromeClient {
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                String[] wanted = request.getResources();
+                boolean microphoneOnly = wanted.length == 1 && PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(wanted[0]);
+                boolean granted = ContextCompat.checkSelfPermission(RipplWallpaperService.this, Manifest.permission.RECORD_AUDIO)
+                        == PackageManager.PERMISSION_GRANTED;
+                if (microphoneOnly && granted) {
+                    request.grant(wanted);
+                } else {
+                    request.deny();
+                }
             }
         }
 

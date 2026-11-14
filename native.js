@@ -149,6 +149,37 @@
         call('SystemBars', on ? 'hide' : 'show', {}).catch(() => {});
     }
 
+    // ---------- Microphone ----------
+
+    // Opens the microphone for listening (nothing is recorded). Resolves with a listener:
+    // read(bytes) fills an array with the current spectrum, 0-255 per band; bandHz is the width of
+    // one band; stop() releases the microphone. Rejects when there is no microphone or it was refused.
+    function openMicrophone () {
+        const media = navigator.mediaDevices;
+        const Context = window.AudioContext || window.webkitAudioContext;
+        if (!media || typeof media.getUserMedia !== 'function' || !Context) {
+            return Promise.reject(new Error('No microphone is available here'));
+        }
+        return media.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }, video: false })
+            .then(stream => {
+                const context = new Context();
+                const analyser = context.createAnalyser();
+                analyser.fftSize = 2048;
+                analyser.smoothingTimeConstant = 0.5;
+                context.createMediaStreamSource(stream).connect(analyser);
+                if (typeof context.resume === 'function') context.resume().catch(() => {});
+                return {
+                    bands: analyser.frequencyBinCount,
+                    bandHz: context.sampleRate / analyser.fftSize,
+                    read: out => analyser.getByteFrequencyData(out),
+                    stop () {
+                        try { stream.getTracks().forEach(t => t.stop()); } catch (e) { /* already gone */ }
+                        if (typeof context.close === 'function') context.close().catch(() => {});
+                    },
+                };
+            });
+    }
+
     // ---------- Live wallpaper ----------
 
     // Opens Android's screen for setting RIPPL Studio as the live wallpaper
@@ -178,5 +209,6 @@
         keepAwake,
         setImmersive,
         setLiveWallpaper,
+        openMicrophone,
     };
 })();

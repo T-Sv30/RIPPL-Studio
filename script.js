@@ -208,6 +208,12 @@ let config = {
     SPLASHES: false,
     WALLPAPER_CLEAR: false,
     // Reacts to: the world beyond your fingers
+    SOUND: false,
+    SOUND_SENSITIVITY: 50,
+    SOUND_PULSE: 60,
+    SOUND_STIR: 50,
+    SOUND_GLOW: 50,
+    SOUND_SPARKS: 50,
     TILT: false,
     TILT_STRENGTH: 50,
     SHAKE_BURST: false,
@@ -782,7 +788,7 @@ function flowUniforms () {
 
 function forcesActive () {
     return FLOW_DIRECTIONS[config.FLOW_DIRECTION] != null && config.FLOW_SPEED > 0
-        || config.SWIRL > 0 || config.TURBULENCE > 0 || config.GRAVITY > 0
+        || config.SWIRL > 0 || config.TURBULENCE > 0 || config.GRAVITY > 0 || config.SOUND || config.TILT
         || config.BUOYANCY !== 50 || config.ELASTICITY > 0
         || config.FORCE_FIELD !== 'None' && config.FIELD_STRENGTH > 0
         || effectiveEdgeMode() !== 1 && (effectiveEdgeMode() === 3 || config.EDGE_FRICTION > 0 || config.EDGE_BOUNCE > 0 || config.CORNER !== 'Normal');
@@ -1042,6 +1048,106 @@ function releasePostFramebuffers () {
 }
 
 // Screen shake follows how hard you are stirring, with a little constant life
+// ---------- Sound ----------
+
+// What the microphone hears, boiled down to a few numbers the fluid can follow
+const sound = {
+    source: null,        // the open microphone (see RipplNative.openMicrophone)
+    opening: false,
+    spectrum: null,
+    level: 0, bass: 0, treble: 0,     // 0..1, after adaptive gain
+    peak: 0.05,          // the loudest recent level, so quiet and loud rooms both react
+    bassAvg: 0,
+    bassPrev: 0,
+    pulse: 0,            // 1 right after a beat, fading
+    beatCooldown: 0,
+    beats: 0,
+    hidden: false,
+};
+
+// On the live wallpaper the microphone would be open all day, so it needs the app's say-so
+function soundAllowed () {
+    return !!config.SOUND && !config.PAUSED && !sound.hidden && (!WALLPAPER_MODE || deviceSettings.WALLPAPER_MIC);
+}
+
+function openSound () {
+    if (sound.source || sound.opening) return;
+    sound.opening = true;
+    platform.openMicrophone().then(src => {
+        sound.opening = false;
+        if (!soundAllowed()) { src.stop(); return; }
+        sound.source = src;
+        sound.spectrum = new Uint8Array(src.bands);
+    }, () => {
+        sound.opening = false;
+        if (!config.SOUND) return;
+        config.SOUND = false;
+        refreshGUI();
+        showToast(WALLPAPER_MODE ? 'Microphone unavailable' : 'Microphone not allowed · Sound reactive is off');
+    });
+}
+
+function closeSound () {
+    if (sound.source) { sound.source.stop(); sound.source = null; }
+    sound.level = sound.bass = sound.treble = sound.pulse = 0;
+}
+
+// Average of the bands between two frequencies, 0..1
+function bandLevel (fromHz, toHz) {
+    const src = sound.source, s = sound.spectrum;
+    const a = Math.max(0, Math.floor(fromHz / src.bandHz)), b = Math.min(s.length, Math.ceil(toHz / src.bandHz));
+    if (b <= a) return 0;
+    let sum = 0;
+    for (let i = a; i < b; i++) sum += s[i];
+    return sum / (b - a) / 255;
+}
+
+function updateSound (dt) {
+    if (soundAllowed()) openSound(); else closeSound();
+    if (!sound.source) return;
+    sound.source.read(sound.spectrum);
+    const gain = Math.pow(config.SOUND_SENSITIVITY / 50, 1.5);
+    const raw = bandLevel(40, 8000) * gain;
+    const rawBass = bandLevel(40, 200) * gain;
+    const rawTreble = bandLevel(2000, 8000) * gain;
+    // Adaptive gain: follow the loudest recent sound, decaying slowly
+    sound.peak = Math.max(0.08, raw, sound.peak * Math.exp(-0.35 * dt));
+    const norm = v => Math.min(1, v / sound.peak);
+    const k = 1 - Math.exp(-dt * 12);
+    sound.level += (norm(raw) - sound.level) * k;
+    sound.bass += (norm(rawBass) - sound.bass) * k;
+    sound.treble += (norm(rawTreble) - sound.treble) * k;
+
+    // A beat: the bass jumps well above its recent average (a held note is one beat, not many)
+    sound.beatCooldown = Math.max(0, sound.beatCooldown - dt);
+    const bassNow = norm(rawBass);
+    if (bassNow > sound.bassAvg * 1.5 + 0.15 && bassNow > sound.bassPrev + 0.1 && sound.beatCooldown === 0) {
+        sound.beatCooldown = 0.18;
+        sound.pulse = 1;
+        sound.beats++;
+        splatStack.push(1 + Math.round(config.SOUND_PULSE / 100 * 6));
+    }
+    sound.bassAvg += (bassNow - sound.bassAvg) * (1 - Math.exp(-dt * 2.5));
+    sound.bassPrev = bassNow;
+    sound.pulse *= Math.exp(-6 * dt);
+}
+
+// How much the sound is adding right now: stirring and swirl, glow, and particle sparks
+function soundReaction () {
+    if (!sound.source) return { stir: 0, pulse: 0, glow: 0, sparks: 0 };
+    return {
+        stir: sound.level * config.SOUND_STIR / 100,
+        pulse: sound.pulse * config.SOUND_PULSE / 100,
+        glow: sound.level * config.SOUND_GLOW / 100,
+        sparks: sound.treble * config.SOUND_SPARKS / 100,
+    };
+}
+
+document.addEventListener('visibilitychange', () => {
+    sound.hidden = document.visibilityState === 'hidden';
+    if (sound.hidden) closeSound();   // never keep the microphone open out of sight
+});
+
 // ---------- Tilt and shake ----------
 
 // The phone's motion sensor: which way is down on the screen, and how hard the phone is shaken
@@ -1937,7 +2043,7 @@ function setParticleDrawUniforms (u, width, height) {
     gl.uniform1f(u.rainbowHue, rainbowHue);
     gl.uniform3f(u.singleColor, colors.single[0], colors.single[1], colors.single[2]);
     ['pal0', 'pal1', 'pal2', 'pal3', 'pal4'].forEach((k, i) => gl.uniform3f(u[k], colors.pal[i].r, colors.pal[i].g, colors.pal[i].b));
-    gl.uniform1f(u.intensity, config.PARTICLE_INTENSITY / 50 * particleMixAmount());
+    gl.uniform1f(u.intensity, config.PARTICLE_INTENSITY / 50 * particleMixAmount() * (1 + soundReaction().sparks * 2));
 }
 
 // Draws particles additively on top of the fluid in `target`
@@ -3016,7 +3122,7 @@ if (WALLPAPER_MODE) {
     window.RipplWallpaper = {
         setVisible (visible) {
             wallpaperPage.hidden = !visible;
-            if (!visible) return;
+            if (!visible) { closeSound(); return; }
             applyWallpaperLook();
             if (wallpaperPage.stopped) {
                 wallpaperPage.stopped = false;
@@ -3378,7 +3484,7 @@ const platform = window.RipplNative;
 
 const CAPTURE_SIZES = { 'Standard (720p)': 720, 'High (1080p)': 1080, 'Maximum (1440p)': 1440 };
 const SIM_RESOLUTIONS = { '32': 32, '64': 64, '128': 128, '256': 256 };
-const deviceSettings = { HAPTICS: true, KEEP_AWAKE: false };
+const deviceSettings = { HAPTICS: true, KEEP_AWAKE: false, WALLPAPER_MIC: false };
 const DEVICE_CHOICES = {
     PERFORMANCE_MODE: Object.keys(PERFORMANCE_MODES),
     FPS_LIMIT: Object.keys(FPS_LIMITS),
@@ -3392,7 +3498,7 @@ const DEVICE_KEYS = Object.keys(DEVICE_CHOICES).concat(['RENDER_SCALE', 'ADAPTIV
 const deviceStore = { saved: null, timer: 0 };
 
 function deviceSnapshot () {
-    const out = { HAPTICS: deviceSettings.HAPTICS, KEEP_AWAKE: deviceSettings.KEEP_AWAKE };
+    const out = { HAPTICS: deviceSettings.HAPTICS, KEEP_AWAKE: deviceSettings.KEEP_AWAKE, WALLPAPER_MIC: deviceSettings.WALLPAPER_MIC };
     DEVICE_KEYS.forEach(k => { out[k] = config[k]; });
     return JSON.stringify(out);
 }
@@ -3446,6 +3552,7 @@ function loadDeviceSettings () {
         });
         if (typeof stored.HAPTICS === 'boolean') deviceSettings.HAPTICS = stored.HAPTICS;
         if (typeof stored.KEEP_AWAKE === 'boolean') deviceSettings.KEEP_AWAKE = stored.KEEP_AWAKE;
+        if (typeof stored.WALLPAPER_MIC === 'boolean') deviceSettings.WALLPAPER_MIC = stored.WALLPAPER_MIC;
     }
     if (WALLPAPER_MODE) {
         // A wallpaper runs all day behind everything else, so it stays light on the battery
@@ -3655,6 +3762,12 @@ const HELP = {
     SPLASHES: 'Drops a few gentle splashes every couple of seconds, so the screen is never still.',
     WALLPAPER_CLEAR: 'Clears the fluid and starts with new splashes each time you return to the app.',
     // Scene: reacts to
+    SOUND: 'The fluid follows what the microphone hears. Nothing is recorded or sent anywhere.',
+    SOUND_SENSITIVITY: 'How loud a sound has to be to count. Raise it for quiet rooms.',
+    SOUND_PULSE: 'How strongly a beat in the bass bursts and spins the fluid.',
+    SOUND_STIR: 'How much loudness stirs the fluid.',
+    SOUND_GLOW: 'How much loudness brightens the glow.',
+    SOUND_SPARKS: 'How much high notes brighten the particles.',
     TILT: 'Gravity follows the way you hold the phone, so color pours toward the low side.',
     TILT_STRENGTH: 'How hard the tilt pulls, on top of the Gravity setting.',
     SHAKE_BURST: 'A firm shake of the phone sets off a burst of color.',
@@ -3866,6 +3979,15 @@ function buildTabs () {
     ];
 
     const reacts = [
+        ctl.heading('Sound'),
+        ctl.toggle('SOUND', 'Sound reactive', v => { if (v) openSound(); else closeSound(); }),
+        ...shownIf(on('SOUND'), [
+            ctl.slider('SOUND_SENSITIVITY', 'Sensitivity'),
+            ctl.slider('SOUND_PULSE', 'Bass pulse'),
+            ctl.slider('SOUND_STIR', 'Stirring'),
+            ctl.slider('SOUND_GLOW', 'Glow'),
+            ctl.slider('SOUND_SPARKS', 'Sparks'),
+        ]),
         ctl.heading('Tilt and shake'),
         ctl.toggle('TILT', 'Tilt sets gravity', v => { if (v) askForMotion(); }),
         ...shownIf(on('TILT'), [ctl.slider('TILT_STRENGTH', 'Tilt strength')]),
@@ -4140,6 +4262,10 @@ function buildTabs () {
         { type: 'toggle', label: 'Keep the screen on',
           help: 'Stops the screen from dimming or locking while RIPPL Studio is open.',
           get: () => deviceSettings.KEEP_AWAKE, set: setKeepAwake },
+        ...(platform.isNative ? [{ type: 'toggle', label: 'Microphone on the live wallpaper',
+          help: 'Lets Sound reactive hear on the live wallpaper too. The microphone indicator then stays on while the home screen shows.',
+          get: () => deviceSettings.WALLPAPER_MIC,
+          set: v => { deviceSettings.WALLPAPER_MIC = v; } }] : []),
         ctl.heading('About'),
         ctl.action('About RIPPL Studio', showAbout, 'Version, credits and license.', { icon: 'logo' }),
         ctl.action('Privacy', showPrivacy, 'What RIPPL Studio does with your data: nothing leaves your device.', { icon: 'look' }),
@@ -6076,6 +6202,7 @@ function update (timestamp) {
     updateTextTexture();
     updateWallpaper(dt);
     updateMotion(dt);
+    updateSound(dt);
     recordHistory(frameSeconds);
     updateColors(dt);
     updatePalette(dt);
@@ -6266,8 +6393,9 @@ function applyForces (dt) {
         gl.uniform1f(u.flowMode, config.FLOW_SPEED > 0 ? flow.mode : -1);
         gl.uniform2f(u.flowDir, flow.x, flow.y);
         gl.uniform1f(u.flowSpeed, config.FLOW_SPEED / 100 * 450);
-        gl.uniform1f(u.swirl, config.SWIRL / 100 * 900);
-        gl.uniform1f(u.turbulence, config.TURBULENCE / 100 * 160);
+        const sr = soundReaction();
+        gl.uniform1f(u.swirl, config.SWIRL / 100 * 900 + sr.pulse * 500);
+        gl.uniform1f(u.turbulence, config.TURBULENCE / 100 * 160 + sr.stir * 120);
         const g = gravityVector();
         gl.uniform2f(u.gravity, g.x, g.y);
         gl.uniform1f(u.elasticity, config.ELASTICITY / 100 * 80);
@@ -6464,7 +6592,7 @@ function applyBloom (source, destination) {
     bloomFinalProgram.bind();
     gl.uniform2f(bloomFinalProgram.uniforms.texelSize, last.texelSizeX, last.texelSizeY);
     gl.uniform1i(bloomFinalProgram.uniforms.uTexture, last.attach(0));
-    gl.uniform1f(bloomFinalProgram.uniforms.intensity, config.BLOOM_INTENSITY);
+    gl.uniform1f(bloomFinalProgram.uniforms.intensity, config.BLOOM_INTENSITY + soundReaction().glow * 1.2);
     blit(destination);
 }
 
