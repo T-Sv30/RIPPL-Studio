@@ -54,6 +54,8 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- "Sound reactive": the fluid follows what the microphone hears. Nothing is recorded. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- Phones without live wallpapers can still install the app; it just can't be one there -->
     <uses-feature android:name="android.software.live_wallpaper" android:required="false" />

@@ -207,6 +207,20 @@ let config = {
     BG_OPACITY: 100,
     SPLASHES: false,
     WALLPAPER_CLEAR: false,
+    // Reacts to: the world beyond your fingers
+    SOUND: false,
+    SOUND_SENSITIVITY: 50,
+    SOUND_PULSE: 60,
+    SOUND_STIR: 50,
+    SOUND_GLOW: 50,
+    SOUND_SPARKS: 50,
+    TILT: false,
+    TILT_STRENGTH: 50,
+    SHAKE_BURST: false,
+    TIME_OF_DAY: false,
+    FOLLOW_THEME: false,
+    WAKE_RIPPLE: false,
+    BATTERY_TINT: false,
 }
 
 
@@ -316,8 +330,17 @@ function updatePalette (dt) {
 
 function samplePalette (u) {
     const to = paletteColor(paletteTo, u);
-    if (paletteMix >= 1) return to;
-    return lerpColor(paletteColor(paletteFrom, u), to, smooth01(paletteMix));
+    const base = paletteMix >= 1 ? to : lerpColor(paletteColor(paletteFrom, u), to, smooth01(paletteMix));
+    return tintColor(base, u);
+}
+
+// The time of day and the battery can pull the colors toward another palette (see "Reacts to")
+function tintColor (color, u) {
+    let c = color;
+    [daylight, battery].forEach(t => {
+        if (t.mix > 0 && t.palette) c = lerpColor(c, paletteColor(t.palette, u), t.mix);
+    });
+    return c;
 }
 
 // Blacklight: push every color to full saturation and extra brightness
@@ -541,6 +564,15 @@ function backgroundTarget () {
         top = bottom = normalizeColor(config.BACK_COLOR);
         glow = { r: 0, g: 0, b: 0 };
     }
+    const toward = (name, mix) => {
+        const b = BACKGROUNDS[name];
+        if (!b || mix <= 0) return;
+        top = lerpColor(top, hexToRGB(b[0]), mix);
+        bottom = lerpColor(bottom, hexToRGB(b[1]), mix);
+        glow = lerpColor(glow, hexToRGB(b[2]), mix);
+    };
+    toward(daylight.background, daylight.mix);
+    toward('Paper', theme.mix);
     if (config.BLACKLIGHT) {
         const I = config.BLACKLIGHT_INTENSITY / 100;
         const f = 0.3 + 0.65 * I;
@@ -778,7 +810,7 @@ function flowUniforms () {
 
 function forcesActive () {
     return FLOW_DIRECTIONS[config.FLOW_DIRECTION] != null && config.FLOW_SPEED > 0
-        || config.SWIRL > 0 || config.TURBULENCE > 0 || config.GRAVITY > 0
+        || config.SWIRL > 0 || config.TURBULENCE > 0 || config.GRAVITY > 0 || config.SOUND || config.TILT
         || config.BUOYANCY !== 50 || config.ELASTICITY > 0
         || config.FORCE_FIELD !== 'None' && config.FIELD_STRENGTH > 0
         || effectiveEdgeMode() !== 1 && (effectiveEdgeMode() === 3 || config.EDGE_FRICTION > 0 || config.EDGE_BOUNCE > 0 || config.CORNER !== 'Normal');
@@ -1038,6 +1070,299 @@ function releasePostFramebuffers () {
 }
 
 // Screen shake follows how hard you are stirring, with a little constant life
+// ---------- Time of day, theme, and what the phone is doing ----------
+
+// A tint drifts toward a target palette and strength; to change palette it fades out first
+function driftTint (t, target, dt) {
+    const want = target && target.mix > 0 ? target : null;
+    const k = 1 - Math.exp(-dt * 0.5);
+    if (want && t.palette !== want.palette && t.mix > 0.02) {
+        t.mix -= t.mix * k;
+        return;
+    }
+    if (want) t.palette = want.palette;
+    const goal = want ? want.mix : 0;
+    t.mix += (goal - t.mix) * k;
+    if (Math.abs(t.mix - goal) < 0.005) t.mix = goal;
+}
+
+const daylight = { palette: null, background: null, mix: 0, hourOverride: null };
+
+// Dawn and dusk warm the picture, night cools it, and the middle of the day is the look itself
+function daylightPhase (hour) {
+    if (hour < 5.5 || hour >= 21) return { palette: 'Galaxy', background: 'Midnight', mix: 0.6 };
+    if (hour < 8.5) return { palette: 'Sunset', background: 'Ember', mix: 0.55 };
+    if (hour < 17) return { palette: null, background: null, mix: 0 };
+    return { palette: 'Gold', background: 'Nebula', mix: 0.5 };
+}
+
+function updateDaylight (dt) {
+    let target = null;
+    if (config.TIME_OF_DAY) {
+        const now = new Date();
+        const hour = daylight.hourOverride != null ? daylight.hourOverride : now.getHours() + now.getMinutes() / 60;
+        target = daylightPhase(hour);
+        if (target.mix > 0 && daylight.background !== target.background && daylight.mix <= 0.02) daylight.background = target.background;
+        if (target.mix > 0 && daylight.background !== target.background) target = { palette: daylight.palette, mix: 0 };
+    }
+    driftTint(daylight, target, dt);
+}
+
+const theme = { light: false, mix: 0, timer: 0 };
+
+function updateTheme (dt) {
+    theme.timer -= dt;
+    if (theme.timer <= 0) {
+        theme.timer = 1;
+        try { theme.light = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches); } catch (e) { theme.light = false; }
+    }
+    const goal = config.FOLLOW_THEME && theme.light ? 1 : 0;
+    theme.mix += (goal - theme.mix) * (1 - Math.exp(-dt * 0.5));
+    if (Math.abs(theme.mix - goal) < 0.005) theme.mix = goal;
+}
+
+const events = { ripples: 0 };
+const battery = { has: false, level: 1, charging: false, palette: null, mix: 0 };
+
+// A ring of color spreading from the middle, for the screen waking or the charger going in
+function wakeRipple () {
+    if (!config.WAKE_RIPPLE || config.PAUSED) return;
+    events.ripples++;
+    const color = generateColor();
+    const count = 12;
+    for (let i = 0; i < count; i++) {
+        const a = (i / count) * Math.PI * 2;
+        const c = { r: color.r * 10, g: color.g * 10, b: color.b * 10 };
+        emitSplat(0.5 + Math.cos(a) * 0.08, 0.5 + Math.sin(a) * 0.08, Math.cos(a) * 900, Math.sin(a) * 900, c, 0.8);
+    }
+}
+
+function watchBattery () {
+    if (!navigator.getBattery) return;
+    navigator.getBattery().then(m => {
+        const sync = () => { battery.has = true; battery.level = m.level; battery.charging = m.charging; };
+        sync();
+        m.addEventListener('levelchange', sync);
+        m.addEventListener('chargingchange', () => { sync(); if (battery.charging) wakeRipple(); });
+    }).catch(() => { /* no battery to watch */ });
+}
+
+// Nearly flat pulls the colors toward fire; charging pulls them toward green
+function batteryTint () {
+    if (!config.BATTERY_TINT || !battery.has) return null;
+    if (battery.charging) return { palette: 'Forest', mix: 0.45 };
+    if (battery.level < 0.3) return { palette: 'Fire', mix: 0.75 * (0.3 - battery.level) / 0.3 };
+    return null;
+}
+
+function updateBattery (dt) {
+    driftTint(battery, batteryTint(), dt);
+}
+
+// ---------- Sound ----------
+
+// What the microphone hears, boiled down to a few numbers the fluid can follow
+const sound = {
+    source: null,        // the open microphone (see RipplNative.openMicrophone)
+    opening: false,
+    spectrum: null,
+    level: 0, bass: 0, treble: 0,     // 0..1, after adaptive gain
+    peak: 0.05,          // the loudest recent level, so quiet and loud rooms both react
+    bassAvg: 0,
+    bassPrev: 0,
+    pulse: 0,            // 1 right after a beat, fading
+    beatCooldown: 0,
+    beats: 0,
+    hidden: false,
+};
+
+// On the live wallpaper the microphone would be open all day, so it needs the app's say-so
+function soundAllowed () {
+    return !!config.SOUND && !config.PAUSED && !sound.hidden && (!WALLPAPER_MODE || deviceSettings.WALLPAPER_MIC);
+}
+
+function openSound () {
+    if (sound.source || sound.opening) return;
+    sound.opening = true;
+    platform.openMicrophone().then(src => {
+        sound.opening = false;
+        if (!soundAllowed()) { src.stop(); return; }
+        sound.source = src;
+        sound.spectrum = new Uint8Array(src.bands);
+    }, () => {
+        sound.opening = false;
+        if (!config.SOUND) return;
+        config.SOUND = false;
+        refreshGUI();
+        showToast(WALLPAPER_MODE ? 'Microphone unavailable' : 'Microphone not allowed · Sound reactive is off');
+    });
+}
+
+function closeSound () {
+    if (sound.source) { sound.source.stop(); sound.source = null; }
+    sound.level = sound.bass = sound.treble = sound.pulse = 0;
+}
+
+// Average of the bands between two frequencies, 0..1
+function bandLevel (fromHz, toHz) {
+    const src = sound.source, s = sound.spectrum;
+    const a = Math.max(0, Math.floor(fromHz / src.bandHz)), b = Math.min(s.length, Math.ceil(toHz / src.bandHz));
+    if (b <= a) return 0;
+    let sum = 0;
+    for (let i = a; i < b; i++) sum += s[i];
+    return sum / (b - a) / 255;
+}
+
+function updateSound (dt) {
+    if (soundAllowed()) openSound(); else closeSound();
+    if (!sound.source) return;
+    sound.source.read(sound.spectrum);
+    const gain = Math.pow(config.SOUND_SENSITIVITY / 50, 1.5);
+    const raw = bandLevel(40, 8000) * gain;
+    const rawBass = bandLevel(40, 200) * gain;
+    const rawTreble = bandLevel(2000, 8000) * gain;
+    // Adaptive gain: follow the loudest recent sound, decaying slowly
+    sound.peak = Math.max(0.08, raw, sound.peak * Math.exp(-0.35 * dt));
+    const norm = v => Math.min(1, v / sound.peak);
+    const k = 1 - Math.exp(-dt * 12);
+    sound.level += (norm(raw) - sound.level) * k;
+    sound.bass += (norm(rawBass) - sound.bass) * k;
+    sound.treble += (norm(rawTreble) - sound.treble) * k;
+
+    // A beat: the bass jumps well above its recent average (a held note is one beat, not many)
+    sound.beatCooldown = Math.max(0, sound.beatCooldown - dt);
+    const bassNow = norm(rawBass);
+    if (bassNow > sound.bassAvg * 1.5 + 0.15 && bassNow > sound.bassPrev + 0.1 && sound.beatCooldown === 0) {
+        sound.beatCooldown = 0.18;
+        sound.pulse = 1;
+        sound.beats++;
+        splatStack.push(1 + Math.round(config.SOUND_PULSE / 100 * 6));
+    }
+    sound.bassAvg += (bassNow - sound.bassAvg) * (1 - Math.exp(-dt * 2.5));
+    sound.bassPrev = bassNow;
+    sound.pulse *= Math.exp(-6 * dt);
+}
+
+// How much the sound is adding right now: stirring and swirl, glow, and particle sparks
+function soundReaction () {
+    if (!sound.source) return { stir: 0, pulse: 0, glow: 0, sparks: 0 };
+    return {
+        stir: sound.level * config.SOUND_STIR / 100,
+        pulse: sound.pulse * config.SOUND_PULSE / 100,
+        glow: sound.level * config.SOUND_GLOW / 100,
+        sparks: sound.treble * config.SOUND_SPARKS / 100,
+    };
+}
+
+document.addEventListener('visibilitychange', () => {
+    sound.hidden = document.visibilityState === 'hidden';
+    if (sound.hidden) closeSound();   // never keep the microphone open out of sight
+});
+
+// ---------- Tilt and shake ----------
+
+// The phone's motion sensor: which way is down on the screen, and how hard the phone is shaken
+const motion = {
+    listening: false,
+    has: false,          // a reading has arrived
+    upX: 0, upY: 1,      // smoothed "up" on the screen (the opposite of where gravity pulls)
+    rawX: 0, rawY: 1,    // the latest reading
+    amount: 0,           // 0 when the phone lies flat, 1 when it stands upright
+    shakeEnergy: 0,
+    shakeArmed: true,
+    bursts: 0,
+};
+
+function screenAngle () {
+    try {
+        if (window.screen && window.screen.orientation && typeof window.screen.orientation.angle === 'number') return window.screen.orientation.angle;
+        if (typeof window.orientation === 'number') return window.orientation;
+    } catch (e) { /* no orientation here */ }
+    return 0;
+}
+
+// Turns a reading in the device's own axes into screen axes (x right, y up)
+function toScreen (x, y) {
+    switch (((screenAngle() % 360) + 360) % 360) {
+        case 90: return [-y, x];
+        case 180: return [-x, -y];
+        case 270: return [y, -x];
+        default: return [x, y];
+    }
+}
+
+function onDeviceMotion (e) {
+    const g = e.accelerationIncludingGravity;
+    if (g && typeof g.x === 'number' && typeof g.y === 'number') {
+        const [sx, sy] = toScreen(g.x, g.y);
+        const len = Math.hypot(sx, sy);
+        motion.amount = Math.min(1, len / 9.8);
+        if (len > 0.5) {
+            // Gravity reads as an upward push on the sensor, so the reading itself points up the screen
+            motion.rawX = sx / len;
+            motion.rawY = sy / len;
+            if (!motion.has) { motion.upX = motion.rawX; motion.upY = motion.rawY; }
+            motion.has = true;
+        }
+    }
+    const a = e.acceleration;
+    if (a && typeof a.x === 'number') {
+        const jolt = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
+        if (jolt > 14) motion.shakeEnergy += jolt;
+    }
+}
+
+function wantsMotion () {
+    return !!(config.TILT || config.SHAKE_BURST) && !config.PAUSED;
+}
+
+function syncMotionListener () {
+    const want = wantsMotion();
+    if (want === motion.listening) return;
+    motion.listening = want;
+    if (want) window.addEventListener('devicemotion', onDeviceMotion);
+    else window.removeEventListener('devicemotion', onDeviceMotion);
+}
+
+// Some browsers (iOS) only hand out motion readings after the user agrees
+function askForMotion () {
+    try {
+        const DM = window.DeviceMotionEvent;
+        if (DM && typeof DM.requestPermission === 'function') DM.requestPermission().catch(() => {});
+    } catch (e) { /* nothing to ask */ }
+}
+
+function updateMotion (dt) {
+    syncMotionListener();
+    if (motion.has) {
+        const k = 1 - Math.exp(-dt * 6);
+        motion.upX += (motion.rawX - motion.upX) * k;
+        motion.upY += (motion.rawY - motion.upY) * k;
+    }
+    motion.shakeEnergy *= Math.exp(-3 * dt);
+    if (motion.shakeEnergy < 5) motion.shakeArmed = true;
+    if (config.SHAKE_BURST && motion.shakeArmed && motion.shakeEnergy > 30) {
+        motion.shakeArmed = false;
+        motion.bursts++;
+        splatStack.push(8 + Math.floor(Math.random() * 8));
+    }
+}
+
+// The force of gravity and buoyancy on the colored fluid, as a direction on the screen
+function gravityVector () {
+    const buoyancy = (config.BUOYANCY - 50) / 50 * 700;
+    let pull = config.GRAVITY / 100 * 700;
+    let upX = 0, upY = 1;
+    if (config.TILT && motion.has) {
+        pull += config.TILT_STRENGTH / 100 * 700 * motion.amount;
+        const len = Math.hypot(motion.upX, motion.upY) || 1;
+        upX = motion.upX / len;
+        upY = motion.upY / len;
+    }
+    const force = buoyancy - pull;
+    return { x: upX * force || 0, y: upY * force || 0 };
+}
+
 function updateShake (dt) {
     let motion = 0;
     pointers.forEach(p => {
@@ -1829,7 +2154,7 @@ function setParticleDrawUniforms (u, width, height) {
     gl.uniform1f(u.rainbowHue, rainbowHue);
     gl.uniform3f(u.singleColor, colors.single[0], colors.single[1], colors.single[2]);
     ['pal0', 'pal1', 'pal2', 'pal3', 'pal4'].forEach((k, i) => gl.uniform3f(u[k], colors.pal[i].r, colors.pal[i].g, colors.pal[i].b));
-    gl.uniform1f(u.intensity, config.PARTICLE_INTENSITY / 50 * particleMixAmount());
+    gl.uniform1f(u.intensity, config.PARTICLE_INTENSITY / 50 * particleMixAmount() * (1 + soundReaction().sparks * 2));
 }
 
 // Draws particles additively on top of the fluid in `target`
@@ -2908,8 +3233,9 @@ if (WALLPAPER_MODE) {
     window.RipplWallpaper = {
         setVisible (visible) {
             wallpaperPage.hidden = !visible;
-            if (!visible) return;
+            if (!visible) { closeSound(); return; }
             applyWallpaperLook();
+            wakeRipple();
             if (wallpaperPage.stopped) {
                 wallpaperPage.stopped = false;
                 lastUpdateTime = null;
@@ -2932,10 +3258,12 @@ function updateWallpaper (dt) {
 }
 
 document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && config.WALLPAPER_CLEAR && dye) {
+    if (document.visibilityState !== 'visible') return;
+    if (config.WALLPAPER_CLEAR && dye) {
         clearFluid();
         splatStack.push(4 + Math.floor(Math.random() * 4));
     }
+    wakeRipple();
 });
 
 function copyText (text) {
@@ -3270,7 +3598,7 @@ const platform = window.RipplNative;
 
 const CAPTURE_SIZES = { 'Standard (720p)': 720, 'High (1080p)': 1080, 'Maximum (1440p)': 1440 };
 const SIM_RESOLUTIONS = { '32': 32, '64': 64, '128': 128, '256': 256 };
-const deviceSettings = { HAPTICS: true, KEEP_AWAKE: false };
+const deviceSettings = { HAPTICS: true, KEEP_AWAKE: false, WALLPAPER_MIC: false };
 const DEVICE_CHOICES = {
     PERFORMANCE_MODE: Object.keys(PERFORMANCE_MODES),
     FPS_LIMIT: Object.keys(FPS_LIMITS),
@@ -3284,7 +3612,7 @@ const DEVICE_KEYS = Object.keys(DEVICE_CHOICES).concat(['RENDER_SCALE', 'ADAPTIV
 const deviceStore = { saved: null, timer: 0 };
 
 function deviceSnapshot () {
-    const out = { HAPTICS: deviceSettings.HAPTICS, KEEP_AWAKE: deviceSettings.KEEP_AWAKE };
+    const out = { HAPTICS: deviceSettings.HAPTICS, KEEP_AWAKE: deviceSettings.KEEP_AWAKE, WALLPAPER_MIC: deviceSettings.WALLPAPER_MIC };
     DEVICE_KEYS.forEach(k => { out[k] = config[k]; });
     return JSON.stringify(out);
 }
@@ -3338,6 +3666,7 @@ function loadDeviceSettings () {
         });
         if (typeof stored.HAPTICS === 'boolean') deviceSettings.HAPTICS = stored.HAPTICS;
         if (typeof stored.KEEP_AWAKE === 'boolean') deviceSettings.KEEP_AWAKE = stored.KEEP_AWAKE;
+        if (typeof stored.WALLPAPER_MIC === 'boolean') deviceSettings.WALLPAPER_MIC = stored.WALLPAPER_MIC;
     }
     if (WALLPAPER_MODE) {
         // A wallpaper runs all day behind everything else, so it stays light on the battery
@@ -3347,6 +3676,7 @@ function loadDeviceSettings () {
     }
     platform.setHaptics(deviceSettings.HAPTICS);
     if (deviceSettings.KEEP_AWAKE) platform.keepAwake(true);
+    watchBattery();
     deviceStore.saved = deviceSnapshot();
     if (recentGraphicsResets().length >= GFX_RESETS_SAFE) {
         applySafeDeviceSettings();
@@ -3546,6 +3876,20 @@ const HELP = {
     TRANSPARENT: 'Saves images without a background, for use over other pictures.',
     SPLASHES: 'Drops a few gentle splashes every couple of seconds, so the screen is never still.',
     WALLPAPER_CLEAR: 'Clears the fluid and starts with new splashes each time you return to the app.',
+    // Scene: reacts to
+    SOUND: 'The fluid follows what the microphone hears. Nothing is recorded or sent anywhere.',
+    SOUND_SENSITIVITY: 'How loud a sound has to be to count. Raise it for quiet rooms.',
+    SOUND_PULSE: 'How strongly a beat in the bass bursts and spins the fluid.',
+    SOUND_STIR: 'How much loudness stirs the fluid.',
+    SOUND_GLOW: 'How much loudness brightens the glow.',
+    SOUND_SPARKS: 'How much high notes brighten the particles.',
+    TILT: 'Gravity follows the way you hold the phone, so color pours toward the low side.',
+    TILT_STRENGTH: 'How hard the tilt pulls, on top of the Gravity setting.',
+    SHAKE_BURST: 'A firm shake of the phone sets off a burst of color.',
+    TIME_OF_DAY: 'Dawn and dusk warm the colors, night cools them, and the middle of the day is the look itself.',
+    FOLLOW_THEME: 'Uses a paper-light background while the device is in light mode.',
+    WAKE_RIPPLE: 'A ring of color spreads from the middle when the screen wakes or the charger goes in.',
+    BATTERY_TINT: 'A nearly flat battery warms the colors toward fire; charging pulls them toward green.',
 };
 
 // Descriptions of individual choices; the one for the current choice is shown under the control
@@ -3751,6 +4095,28 @@ function buildTabs () {
         ...shownIf(on('KALEIDOSCOPE'), [
             ctl.select('KALEIDO_SEGMENTS', 'Segments', SEGMENT_CHOICES, null, { chips: true }),
         ]),
+    ];
+
+    const reacts = [
+        ctl.heading('Sound'),
+        ctl.toggle('SOUND', 'Sound reactive', v => { if (v) openSound(); else closeSound(); }),
+        ...shownIf(on('SOUND'), [
+            ctl.slider('SOUND_SENSITIVITY', 'Sensitivity'),
+            ctl.slider('SOUND_PULSE', 'Bass pulse'),
+            ctl.slider('SOUND_STIR', 'Stirring'),
+            ctl.slider('SOUND_GLOW', 'Glow'),
+            ctl.slider('SOUND_SPARKS', 'Sparks'),
+        ]),
+        ctl.heading('Tilt and shake'),
+        ctl.toggle('TILT', 'Tilt sets gravity', v => { if (v) askForMotion(); }),
+        ...shownIf(on('TILT'), [ctl.slider('TILT_STRENGTH', 'Tilt strength')]),
+        ctl.toggle('SHAKE_BURST', 'Shake for a burst', v => { if (v) askForMotion(); }),
+        ctl.heading('Time of day'),
+        ctl.toggle('TIME_OF_DAY', 'Follow the time of day'),
+        ctl.toggle('FOLLOW_THEME', 'Lighter in light mode'),
+        ctl.heading('Phone'),
+        ctl.toggle('WAKE_RIPPLE', 'Ripple when the screen wakes'),
+        ctl.toggle('BATTERY_TINT', 'Colors follow the battery'),
     ];
 
     const touch = [
@@ -4021,6 +4387,10 @@ function buildTabs () {
         { type: 'toggle', label: 'Keep the screen on',
           help: 'Stops the screen from dimming or locking while RIPPL Studio is open.',
           get: () => deviceSettings.KEEP_AWAKE, set: setKeepAwake },
+        ...(platform.isNative ? [{ type: 'toggle', label: 'Microphone on the live wallpaper',
+          help: 'Lets Sound reactive hear on the live wallpaper too. The microphone indicator then stays on while the home screen shows.',
+          get: () => deviceSettings.WALLPAPER_MIC,
+          set: v => { deviceSettings.WALLPAPER_MIC = v; } }] : []),
         ctl.heading('About'),
         ctl.action('About RIPPL Studio', showAbout, 'Version, credits and license.', { icon: 'logo' }),
         ctl.action('Privacy', showPrivacy, 'What RIPPL Studio does with your data: nothing leaves your device.', { icon: 'look' }),
@@ -4032,6 +4402,7 @@ function buildTabs () {
         { id: 'scene', label: 'Scene', icon: 'scene', sections: [
             { id: 'scene', label: 'Scene', controls: scene, help: 'What is happening on screen.' },
             { id: 'touch', label: 'Touch', controls: touch, help: 'What your fingers do to the fluid.' },
+            { id: 'reacts', label: 'Reacts to', controls: reacts, help: 'What the fluid reacts to besides your fingers.' },
         ] },
         { id: 'color', label: 'Color', icon: 'palette', sections: [
             { id: 'palette', label: 'Palette', controls: palette, help: 'The colors the fluid is painted with.' },
@@ -5140,7 +5511,7 @@ const forcesShader = compileShader(gl.FRAGMENT_SHADER, `
     uniform float flowSpeed;
     uniform float swirl;
     uniform float turbulence;
-    uniform float buoyancy;
+    uniform vec2 gravity;
     uniform float elasticity;
     uniform float edgeMode;
     uniform float cornerMode;
@@ -5218,8 +5589,8 @@ const forcesShader = compileShader(gl.FRAGMENT_SHADER, `
             v += c * turbulence * dt;
         }
 
-        // Gravity and buoyancy act on the colored fluid
-        v.y += buoyancy * w * dt;
+        // Gravity and buoyancy act on the colored fluid, along whichever way is down
+        v += gravity * w * dt;
 
         // Force fields
         if (fieldMode > 0.5) {
@@ -5955,6 +6326,11 @@ function update (timestamp) {
         initFramebuffers();
     updateTextTexture();
     updateWallpaper(dt);
+    updateMotion(dt);
+    updateSound(dt);
+    updateDaylight(dt);
+    updateTheme(dt);
+    updateBattery(dt);
     recordHistory(frameSeconds);
     updateColors(dt);
     updatePalette(dt);
@@ -6145,9 +6521,11 @@ function applyForces (dt) {
         gl.uniform1f(u.flowMode, config.FLOW_SPEED > 0 ? flow.mode : -1);
         gl.uniform2f(u.flowDir, flow.x, flow.y);
         gl.uniform1f(u.flowSpeed, config.FLOW_SPEED / 100 * 450);
-        gl.uniform1f(u.swirl, config.SWIRL / 100 * 900);
-        gl.uniform1f(u.turbulence, config.TURBULENCE / 100 * 160);
-        gl.uniform1f(u.buoyancy, (config.BUOYANCY - 50) / 50 * 700 - config.GRAVITY / 100 * 700);
+        const sr = soundReaction();
+        gl.uniform1f(u.swirl, config.SWIRL / 100 * 900 + sr.pulse * 500);
+        gl.uniform1f(u.turbulence, config.TURBULENCE / 100 * 160 + sr.stir * 120);
+        const g = gravityVector();
+        gl.uniform2f(u.gravity, g.x, g.y);
         gl.uniform1f(u.elasticity, config.ELASTICITY / 100 * 80);
         gl.uniform1f(u.edgeMode, edgeMode);
         gl.uniform1f(u.cornerMode, CORNER_MODES.indexOf(config.CORNER));
@@ -6342,7 +6720,7 @@ function applyBloom (source, destination) {
     bloomFinalProgram.bind();
     gl.uniform2f(bloomFinalProgram.uniforms.texelSize, last.texelSizeX, last.texelSizeY);
     gl.uniform1i(bloomFinalProgram.uniforms.uTexture, last.attach(0));
-    gl.uniform1f(bloomFinalProgram.uniforms.intensity, config.BLOOM_INTENSITY);
+    gl.uniform1f(bloomFinalProgram.uniforms.intensity, config.BLOOM_INTENSITY + soundReaction().glow * 1.2);
     blit(destination);
 }
 

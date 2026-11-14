@@ -910,3 +910,254 @@ describe('inside the Android app', () => {
         assert.equal(app.window.navigator.serviceWorker, undefined);
     });
 });
+
+describe('reacts to the world', () => {
+    const motion = (withGravity, without) => {
+        const ev = new app.window.Event('devicemotion');
+        Object.defineProperty(ev, 'accelerationIncludingGravity', { value: withGravity });
+        Object.defineProperty(ev, 'acceleration', { value: without || { x: 0, y: 0, z: 0 } });
+        app.window.dispatchEvent(ev);
+    };
+
+    test('tilting the phone turns gravity toward the low side', () => {
+        start({ storage: WELCOMED });
+        app.run('config.TILT = true; config.GRAVITY = 50');
+        app.frames(1);
+        // Upright: gravity reads +9.8 along the device's y axis, so "down" is straight down the screen
+        motion({ x: 0, y: 9.8, z: 0 });
+        app.frames(5);
+        let g = app.run('gravityVector()');
+        assert.ok(g.y < -100 && Math.abs(g.x) < 1, 'pulls down the screen: ' + JSON.stringify(g));
+        // Leaning the phone onto its right side: gravity now reads along +x
+        motion({ x: 9.8, y: 0, z: 0 });
+        app.frames(20);
+        g = app.run('gravityVector()');
+        assert.ok(g.x < -100 && Math.abs(g.y) < 20, 'pulls toward the right side, which is -x on screen: ' + JSON.stringify(g));
+        // Off: back to plain downward gravity
+        app.run('config.TILT = false');
+        assert.equal(app.run('JSON.stringify(gravityVector())'), '{"x":0,"y":-350}');
+        assert.deepEqual(app.errors, []);
+    });
+
+    // A stand-in for the browser's microphone and audio analysis
+    function fakeMicrophone (spectrum, { refuse = false } = {}) {
+        const w = app.window;
+        const mic = { opened: 0, stopped: 0, spectrum };
+        w.navigator.mediaDevices = {
+            getUserMedia () {
+                if (refuse) return Promise.reject(new w.Error('NotAllowedError'));
+                mic.opened++;
+                return Promise.resolve({ getTracks: () => [{ stop () { mic.stopped++; } }] });
+            },
+        };
+        w.AudioContext = class {
+            constructor () { this.sampleRate = 48000; }
+            createAnalyser () {
+                return { fftSize: 2048, frequencyBinCount: 1024, smoothingTimeConstant: 0,
+                         getByteFrequencyData (out) { mic.spectrum(out); } };
+            }
+            createMediaStreamSource () { return { connect () {} }; }
+            resume () { return Promise.resolve(); }
+            close () { return Promise.resolve(); }
+        };
+        return mic;
+    }
+    const silence = out => out.fill(0);
+    // Loud at the bottom of the spectrum, quiet above (bins are ~23 Hz wide at 48 kHz / 2048)
+    const bassHit = out => { out.fill(0); for (let i = 2; i < 9; i++) out[i] = 240; };
+    const hiss = out => { out.fill(0); for (let i = 90; i < 340; i++) out[i] = 180; };
+
+    test('sound stirs, glows and sparks, and a bass hit bursts color', async () => {
+        start({ storage: WELCOMED });
+        const mic = fakeMicrophone(silence);
+        openTab('Scene', 'Reacts to');
+        app.click(row('Sound reactive').querySelector('.rs-switch'));
+        await app.settle();
+        assert.equal(mic.opened, 1, 'the microphone opens when the switch goes on');
+        app.frames(10);
+        let r = app.run('JSON.parse(JSON.stringify(soundReaction()))');
+        assert.ok(r.stir === 0 && r.glow === 0 && r.sparks === 0, 'silence does nothing: ' + JSON.stringify(r));
+        mic.spectrum = hiss;
+        app.frames(4);
+        r = app.run('JSON.parse(JSON.stringify(soundReaction()))');
+        assert.ok(r.sparks > 0.2, 'treble sparks the particles: ' + JSON.stringify(r));
+        assert.ok(r.stir > 0 && r.glow > 0, 'and any sound stirs and glows');
+        assert.equal(app.run('sound.beats'), 0, 'hiss is not a beat');
+        mic.spectrum = silence;
+        app.frames(20);
+        mic.spectrum = bassHit;
+        app.frames(2);
+        assert.equal(app.run('sound.beats'), 1, 'a bass hit is one beat');
+        app.frames(2);
+        assert.equal(app.run('sound.beats'), 1, 'holding the note is not another beat');
+        app.click(row('Sound reactive').querySelector('.rs-switch'));
+        app.frames(2);
+        assert.equal(mic.stopped, 1, 'switching off releases the microphone');
+        assert.deepEqual(app.errors, []);
+    });
+
+    test('when the microphone is refused, Sound switches itself off and says so', async () => {
+        start({ storage: WELCOMED });
+        fakeMicrophone(silence, { refuse: true });
+        openTab('Scene', 'Reacts to');
+        app.click(row('Sound reactive').querySelector('.rs-switch'));
+        await app.settle();
+        await app.settle();
+        assert.equal(app.run('config.SOUND'), false);
+        assert.match(app.$('.toast, .rs-toast, #toast') ? app.$('.toast, .rs-toast, #toast').textContent : app.document.body.textContent, /microphone/i);
+    });
+
+    test('the microphone is released while the app is hidden and opened again when shown', async () => {
+        start({ storage: WELCOMED });
+        const mic = fakeMicrophone(silence);
+        app.run('config.SOUND = true');
+        app.frames(2);
+        await app.settle();
+        assert.equal(mic.opened, 1);
+        Object.defineProperty(app.document, 'visibilityState', { value: 'hidden', configurable: true });
+        app.document.dispatchEvent(new app.window.Event('visibilitychange'));
+        app.frames(2);
+        assert.equal(mic.stopped, 1, 'released while hidden');
+        Object.defineProperty(app.document, 'visibilityState', { value: 'visible', configurable: true });
+        app.document.dispatchEvent(new app.window.Event('visibilitychange'));
+        app.frames(2);
+        await app.settle();
+        assert.equal(mic.opened, 2, 'opened again when shown');
+    });
+
+    test('on the wallpaper the microphone stays closed unless the app allows it', async () => {
+        const look = JSON.stringify({ SOUND: true });
+        start({ url: 'https://localhost/?wallpaper=1', storage: { 'rippl.wallpaperLook': look } });
+        let mic = fakeMicrophone(silence);
+        app.frames(3);
+        await app.settle();
+        assert.equal(mic.opened, 0, 'off by default');
+        app.close();
+        start({ url: 'https://localhost/?wallpaper=1', storage: { 'rippl.wallpaperLook': look, 'rippl.device': JSON.stringify({ WALLPAPER_MIC: true }) } });
+        mic = fakeMicrophone(silence);
+        app.frames(3);
+        await app.settle();
+        assert.equal(mic.opened, 1, 'allowed in the app');
+        app.run('RipplWallpaper.setVisible(false)');
+        app.frames(2);
+        assert.equal(mic.stopped, 1, 'released while the home screen is covered');
+    });
+
+    const lightMode = () => { app.window.matchMedia = q => ({ matches: /light/.test(q), addEventListener () {}, removeEventListener () {} }); };
+    const bg = () => app.run('JSON.parse(JSON.stringify(backgroundTarget()))');
+    const paletteSample = () => app.run('JSON.stringify([0, 0.3, 0.6, 0.9].map(samplePalette))');
+
+    test('following the time of day, night and dawn shift the colors and the background; midday is the look itself', () => {
+        start({ storage: WELCOMED });
+        app.run("config.PALETTE = 'Ocean'; config.BACKGROUND = 'Black'; daylight.hourOverride = 12");
+        app.frames(5);
+        const noon = { bg: bg(), palette: paletteSample() };
+        app.run('config.TIME_OF_DAY = true');
+        app.frames(60);
+        assert.deepEqual({ bg: bg(), palette: paletteSample() }, noon, 'midday leaves the look alone');
+        app.run('daylight.hourOverride = 23');
+        app.frames(200);
+        const night = bg();
+        assert.ok(night.top.b > noon.bg.top.b + 0.03, 'a bluer night background: ' + JSON.stringify(night.top));
+        assert.notEqual(paletteSample(), noon.palette, 'night colors');
+        app.run('daylight.hourOverride = 6.5');
+        app.frames(400);
+        const dawn = bg();
+        assert.ok(dawn.top.r > night.top.r + 0.03, 'a warmer dawn: ' + JSON.stringify(dawn.top));
+        app.run('config.TIME_OF_DAY = false');
+        app.frames(200);
+        assert.deepEqual({ bg: bg(), palette: paletteSample() }, noon, 'off restores the look');
+        assert.deepEqual(app.errors, []);
+    });
+
+    test('the time of day is saved with a look and respected on the wallpaper', () => {
+        start({ storage: WELCOMED });
+        app.run('config.TIME_OF_DAY = true');
+        const link = app.run('wallpaperLink()');
+        app.close();
+        start({ url: link });
+        assert.equal(app.run('config.TIME_OF_DAY'), true);
+        app.run('daylight.hourOverride = 2');
+        app.frames(200);
+        assert.ok(app.run('daylight.mix') > 0.5, 'the wallpaper drifts into its night colors');
+    });
+
+    test('following the system theme, light mode gets a light background', () => {
+        start({ storage: WELCOMED });
+        app.run("config.BACKGROUND = 'Black'");
+        lightMode();
+        app.frames(5);
+        assert.ok(bg().top.r < 0.1, 'the look’s own background while the setting is off');
+        app.run('config.FOLLOW_THEME = true');
+        app.frames(200);
+        assert.ok(bg().top.r > 0.8, 'a paper-light background in light mode: ' + JSON.stringify(bg().top));
+        app.window.matchMedia = () => ({ matches: false, addEventListener () {}, removeEventListener () {} });
+        app.frames(200);
+        assert.ok(bg().top.r < 0.1, 'back to the look in dark mode');
+    });
+
+    test('the screen waking and the charger going in send out a ripple', async () => {
+        start({ storage: WELCOMED, battery: { level: 0.8, charging: false } });
+        app.frames(2);
+        await app.settle();
+        app.run('config.WAKE_RIPPLE = true');
+        const show = () => {
+            Object.defineProperty(app.document, 'visibilityState', { value: 'visible', configurable: true });
+            app.document.dispatchEvent(new app.window.Event('visibilitychange'));
+        };
+        show();
+        assert.equal(app.run('events.ripples'), 1, 'the screen waking');
+        app.battery(0.8, true);
+        assert.equal(app.run('events.ripples'), 2, 'the charger going in');
+        app.battery(0.79, true);
+        assert.equal(app.run('events.ripples'), 2, 'the level ticking down is not an event');
+        app.run('config.WAKE_RIPPLE = false');
+        show();
+        assert.equal(app.run('events.ripples'), 2, 'off means off');
+        assert.deepEqual(app.errors, []);
+    });
+
+    test('with the battery tint on, a low battery warms the colors and charging cools them', async () => {
+        start({ storage: WELCOMED, battery: { level: 0.9, charging: false } });
+        app.run("config.PALETTE = 'Ocean'; config.BATTERY_TINT = true");
+        app.frames(2);
+        await app.settle();
+        app.frames(100);
+        const full = app.run('JSON.parse(JSON.stringify(samplePalette(0.5)))');
+        app.battery(0.1, false);
+        app.frames(200);
+        const low = app.run('JSON.parse(JSON.stringify(samplePalette(0.5)))');
+        assert.ok(low.r > full.r + 0.1, 'warmer when nearly flat: ' + JSON.stringify([full, low]));
+        app.battery(0.1, true);
+        app.frames(200);
+        const charging = app.run('JSON.parse(JSON.stringify(samplePalette(0.5)))');
+        assert.ok(charging.r < low.r - 0.1, 'cooler while charging: ' + JSON.stringify([low, charging]));
+        app.run('config.BATTERY_TINT = false');
+        app.frames(200);
+        assert.deepEqual(app.run('JSON.parse(JSON.stringify(samplePalette(0.5)))'), full, 'off restores the look');
+    });
+
+    test('a shake bursts color, once per shake', () => {
+        start({ storage: WELCOMED });
+        app.run('config.SHAKE_BURST = true');
+        app.frames(1);
+        motion({ x: 0, y: 9.8, z: 0 }, { x: 25, y: 0, z: 0 });
+        motion({ x: 0, y: 9.8, z: 0 }, { x: -25, y: 0, z: 0 });
+        motion({ x: 0, y: 9.8, z: 0 }, { x: 25, y: 0, z: 0 });
+        app.frames(1);
+        assert.equal(app.run('motion.bursts'), 1, 'one burst');
+        motion({ x: 0, y: 9.8, z: 0 }, { x: 25, y: 0, z: 0 });
+        app.frames(1);
+        assert.equal(app.run('motion.bursts'), 1, 'not again until the shake has settled');
+        app.frames(60);
+        assert.equal(app.run('motion.shakeArmed'), true, 'ready again once still');
+        app.run('config.SHAKE_BURST = false');
+        app.frames(1);
+        motion({ x: 0, y: 9.8, z: 0 }, { x: 25, y: 0, z: 0 });
+        motion({ x: 0, y: 9.8, z: 0 }, { x: -25, y: 0, z: 0 });
+        motion({ x: 0, y: 9.8, z: 0 }, { x: 25, y: 0, z: 0 });
+        app.frames(1);
+        assert.equal(app.run('motion.bursts'), 1, 'off means off');
+        assert.deepEqual(app.errors, []);
+    });
+});
