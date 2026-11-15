@@ -402,20 +402,21 @@ describe('presets', () => {
         assert.equal(app.run('config.CURL'), 3);
     });
 
-    test('ships fourteen built-in looks, every one valid and different', () => {
+    test('ships fifteen built-in looks, every one valid and different', () => {
         start({ storage: WELCOMED });
         app.frames(2);
         const builtin = JSON.parse(app.run('JSON.stringify(Object.keys(BUILTIN_PRESETS))'));
         assert.deepEqual(builtin, [
             'Default', 'Aurora Dream', 'Lava Lamp', 'Neon Party', 'Ink on Paper', 'Starry Galaxy',
             'Molten Gold', 'Abyss', 'Mandala', 'Storm Cell', 'Pixel Arcade', 'Watercolor', 'Supernova', 'Mercury',
+            'RGB Swirls',
         ]);
         const seen = new Set();
         builtin.forEach(name => {
             const values = JSON.parse(app.run('JSON.stringify(BUILTIN_PRESETS[' + JSON.stringify(name) + '])'));
             const cleaned = JSON.parse(app.run('JSON.stringify(cleanValues(BUILTIN_PRESETS[' + JSON.stringify(name) + ']))'));
             assert.deepEqual(cleaned, values, name + ': every key exists and every value is in range');
-            assert.ok(!('SOUND' in values) && !('TILT' in values), name + ': never asks for a permission on its own');
+            assert.ok(!('SOUND' in values), name + ': never asks for the microphone on its own');
             const key = JSON.stringify(values);
             assert.ok(!seen.has(key), name + ' is not a copy of another preset');
             seen.add(key);

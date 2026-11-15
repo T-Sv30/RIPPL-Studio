@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+- New built-in preset **RGB Swirls**: fast, springy swirls that drift out from the middle and off
+  the edges, glowing like glass and sweeping slowly through the rainbow. Tilt the phone to pour them
+  to one side.
+
 ## 1.0.5
 
 ### Changes
