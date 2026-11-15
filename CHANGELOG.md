@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.5
 
 ### Changes
 - **Reacts to** (Scene tab): the fluid can follow the world beyond your fingers, in the app and
