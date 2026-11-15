@@ -2788,13 +2788,16 @@ function refreshPresetList () {
     if (window.RipplUI) window.RipplUI.refreshPresets();
 }
 
+const FIRST_LOOK = 'RGB Swirls';   // what a fresh install opens with, before any preset has been chosen
+
 // Restores the last preset used on this device; runs once everything is initialized
 function initPresets () {
     DEFAULT_VALUES = snapshotValues();
     loadStoredPresets();
     const saved = storeGet('fluidfix.currentPreset');
     try {
-        if (saved && saved !== 'Default' && presetNames().indexOf(saved) !== -1) selectPreset(saved, true);
+        if (!saved) selectPreset(FIRST_LOOK, true);
+        else if (saved !== 'Default' && presetNames().indexOf(saved) !== -1) selectPreset(saved, true);
         else selectPreset('Default', false);
     } catch (e) {
         console.warn('Could not restore the last preset; starting from Default', e);

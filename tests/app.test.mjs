@@ -6,7 +6,8 @@ let app = null;
 const start = options => (app = boot(options));
 afterEach(() => { if (app) app.close(); app = null; });
 
-const WELCOMED = { 'rippl.welcomed': '1' };
+// A device that has been used before: welcomed, and the app has already recorded a preset choice
+const WELCOMED = { 'rippl.welcomed': '1', 'fluidfix.currentPreset': 'Default' };
 
 function openTab (label, section) {
     app.run('RipplUI.open()');
@@ -400,6 +401,23 @@ describe('presets', () => {
         assert.equal(app.run('config.CURL'), 30);
         app.run('redo()');
         assert.equal(app.run('config.CURL'), 3);
+    });
+
+    test('a fresh install opens on RGB Swirls; a device that has chosen a preset keeps it', () => {
+        start();
+        assert.equal(app.run('presetState.current'), 'RGB Swirls');
+        assert.equal(app.run('config.SWIRL'), 75, 'the look is applied, not just selected');
+        assert.equal(app.window.localStorage.getItem('fluidfix.currentPreset'), 'RGB Swirls');
+        app.close();
+
+        start({ storage: { 'rippl.welcomed': '1', 'fluidfix.currentPreset': 'Default' } });
+        assert.equal(app.run('presetState.current'), 'Default', 'Default was a choice, so it stays');
+        assert.equal(app.run('config.SWIRL'), 0);
+        app.close();
+
+        start({ storage: { 'rippl.welcomed': '1', 'fluidfix.currentPreset': 'Lava Lamp' } });
+        assert.equal(app.run('presetState.current'), 'Lava Lamp');
+        assert.equal(app.run('config.PALETTE'), 'Fire');
     });
 
     test('ships fifteen built-in looks, every one valid and different', () => {
