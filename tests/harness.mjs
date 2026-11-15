@@ -61,7 +61,8 @@ function fake2D () {
 }
 
 // url: the address the app is opened at (the wallpaper page is the app with ?wallpaper=1)
-export function boot ({ native = false, storage = {}, deviceMemory, gl = {}, url = 'https://localhost/' } = {}) {
+// battery: { level (0..1), charging } makes the browser report a battery; app.battery(level, charging) changes it later
+export function boot ({ native = false, storage = {}, deviceMemory, gl = {}, url = 'https://localhost/', battery = null } = {}) {
     const dom = new JSDOM(read('index.html'), { url, runScripts: 'outside-only' });
     const { window } = dom;
     // A phone, so the tests exercise the mobile defaults on any machine
@@ -73,6 +74,17 @@ export function boot ({ native = false, storage = {}, deviceMemory, gl = {}, url
     const errors = [];
     window.addEventListener('error', e => errors.push(e.error || e.message));
     Object.keys(storage).forEach(k => window.localStorage.setItem(k, storage[k]));
+
+    const batteryListeners = {};
+    const batteryState = battery ? { level: battery.level, charging: !!battery.charging } : null;
+    if (batteryState) {
+        const manager = {
+            get level () { return batteryState.level; },
+            get charging () { return batteryState.charging; },
+            addEventListener: (name, fn) => { batteryListeners[name] = fn; },
+        };
+        window.navigator.getBattery = () => Promise.resolve(manager);
+    }
 
     const frames = [];
     window.requestAnimationFrame = fn => frames.push(fn);
@@ -129,6 +141,13 @@ export function boot ({ native = false, storage = {}, deviceMemory, gl = {}, url
                 const fn = frames.shift();
                 if (fn) fn(clock);
             }
+        },
+        battery (level, charging) {
+            const wasCharging = batteryState.charging;
+            batteryState.level = level;
+            batteryState.charging = !!charging;
+            if (batteryListeners.levelchange) batteryListeners.levelchange();
+            if (wasCharging !== batteryState.charging && batteryListeners.chargingchange) batteryListeners.chargingchange();
         },
         $: sel => window.document.querySelector(sel),
         $$: sel => Array.from(window.document.querySelectorAll(sel)),

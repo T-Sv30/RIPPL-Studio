@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+- **Reacts to** (Scene tab): the fluid can follow the world beyond your fingers, in the app and
+  on the live wallpaper.
+  - **Sound reactive**: loudness stirs the fluid and brightens the glow, high notes brighten the
+    particles, and a beat in the bass bursts and spins it. Nothing is recorded, and the microphone
+    is released whenever the app is out of sight. On the live wallpaper it is only used if
+    System > App > "Microphone on the live wallpaper" is on.
+  - **Tilt sets gravity** and **Shake for a burst**: color pours toward the low side of the phone,
+    and a firm shake sets off a splash.
+  - **Follow the time of day** and **Lighter in light mode**: dawn and dusk warm the colors, night
+    cools them; a paper-light background in light mode.
+  - **Ripple when the screen wakes** and **Colors follow the battery**: a ring of color when the
+    screen wakes or the charger goes in; a nearly flat battery warms the colors, charging pulls
+    them toward green.
+- Eight new built-in presets, each built around a different side of the engine: **Molten Gold**
+  (thick liquid metal with wet highlights and depth), **Abyss** (glowing bubbles rising through
+  deep water under shafts of light), **Mandala** (an eight-fold kaleidoscope that drifts through
+  the palettes), **Storm Cell** (crackling icy plasma with sparks and a trembling screen),
+  **Pixel Arcade** (chunky pixels and neon rainbow bursts that wrap around the screen),
+  **Watercolor** (pigment bleeding into grainy paper with petals of dust), **Supernova** (bursts
+  that cool from white-hot through red to a violet afterglow) and **Mercury** (heavy chrome blobs
+  that mirror their surroundings and bounce off the edges).
+
 ## 1.0.4
 
 ### Changes
