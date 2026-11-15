@@ -2818,6 +2818,78 @@ const BUILTIN_PRESETS = {
     'Neon Party': { PALETTE: 'Neon', BLACKLIGHT: true, MIRROR_MODE: 'Complex', AUTOPLAY: true, RAINBOW: true },
     'Ink on Paper': { BACKGROUND: 'Paper', BLOOM: false, SUNRAYS: false, PALETTE: 'Ocean', CURL: 20, DENSITY_DISSIPATION: 0.92 },
     'Starry Galaxy': { SIM_MODE: 'Galaxy', FORCE_FIELD: 'Vortex', FIELD_STRENGTH: 45, CURL: 25, PALETTE: 'Galaxy', BACKGROUND: 'Midnight', PARTICLES: true, PARTICLE_STYLE: 'Dust', PARTICLE_AMOUNT: 'Ultra' },
+    // Liquid metal: thick, slow, lit from the side with wet highlights and a drop shadow
+    'Molten Gold': {
+        PALETTE: 'Gold', BACKGROUND: 'Charcoal',
+        VISCOSITY: 55, BUOYANCY: 62, CURL: 12, SPLAT_RADIUS: 0.4, VELOCITY_DISSIPATION: 0.35, TRAILS: true,
+        SHADING: true, DEPTH: 55, SPECULAR: true, SPECULAR_STYLE: 'Glossy', REFLECTION: 25,
+        BLOOM_INTENSITY: 1.0, BLOOM_THRESHOLD: 0.5, GLOW_INTENSITY: 20, GLOW_RADIUS: 50,
+        FLARE: true, FLARE_STYLE: 'Soft', GAMMA: true, GAMMA_MODE: 'Cinematic', CONTRAST: 58,
+        SPLASHES: true,
+    },
+    // The deep sea: glowing bubbles rise through thick dark water, shafts of light from above
+    'Abyss': {
+        PALETTE: 'Ocean', BACKGROUND: 'Deep Ocean',
+        VISCOSITY: 35, BUOYANCY: 70, TURBULENCE: 12, CURL: 18, TRAILS: true, SPLAT_RADIUS: 0.3,
+        GLOW_INTENSITY: 35, GLOW_RADIUS: 60, SUNRAYS_WEIGHT: 0.8, BG_BLUR: 40, BLOOM_THRESHOLD: 0.5,
+        PARTICLES: true, PARTICLE_STYLE: 'Bubbles', PARTICLE_AMOUNT: 'High', PARTICLE_SIZE: 15, PARTICLE_GLOW: 60,
+        PARTICLE_SPEED: 30, PARTICLE_DRAG: 60, PARTICLE_FADE: 15, PARTICLE_TURBULENCE: 20,
+        SPLASHES: true,
+    },
+    // A slowly turning kaleidoscope: every stroke becomes an eight-fold mandala that drifts through the palettes
+    'Mandala': {
+        PALETTE: 'Candy', BACKGROUND: 'Midnight',
+        KALEIDOSCOPE: true, KALEIDO_SEGMENTS: 8, SWIRL: 25, CURL: 20, VELOCITY_DISSIPATION: 0.35,
+        DENSITY_DISSIPATION: pctFadeTo(80), TRAILS: true, SPLAT_RADIUS: 0.2,
+        AUTO_TRANSITION: true, TRANSITION_TIME: 15, GLOW_INTENSITY: 25,
+        MOTION: true, MOTION_STYLE: 'Fluid', MOTION_INTENSITY: 40,
+        SPLASHES: true,
+    },
+    // Crackling plasma: icy arcs in heavy turbulence, sparks fly off the fast parts, the screen trembles
+    'Storm Cell': {
+        PALETTE: 'Ice', BACKGROUND: 'Charcoal',
+        SIM_MODE: 'Plasma', TURBULENCE: 70, CURL: 50, VELOCITY_DISSIPATION: 0.3,
+        BLOOM_INTENSITY: 1.1, BLOOM_THRESHOLD: 0.45, CONTRAST: 62, FRINGE: true, CHROMATIC_ABERRATION: 20,
+        FLARE: true, FLARE_STYLE: 'Sharp', SHAKE: true, SHAKE_STYLE: 'Subtle', SHAKE_BURST: true,
+        PARTICLES: true, PARTICLE_STYLE: 'Sparks', PARTICLE_AMOUNT: 'High', PARTICLE_COLOR_MODE: 'Velocity-Based',
+        PARTICLE_SPEED: 70, PARTICLE_LENGTH: 60, PARTICLE_FADE: 50, PARTICLE_SIZE: 12,
+    },
+    // Chunky pixels, neon colors sweeping through the rainbow, bursts of color that wrap around the screen
+    'Pixel Arcade': {
+        PALETTE: 'Neon', BACKGROUND: 'Black',
+        PIXELS: true, PIXEL_MODE: '8×', SHADING: false, SUNRAYS: false, BLOOM_INTENSITY: 0.6,
+        RAINBOW: true, RAINBOW_SPEED: 0.2, SATURATION: 65, CONTRAST: 65,
+        MIRROR_MODE: 'Horizontal', INJECTION: 'Burst', CURL: 35, DENSITY_DISSIPATION: pctFadeTo(45),
+        EDGE: 'Wrap', AUTOPLAY: true,
+    },
+    // Pigment bleeding into wet paper: soft, slow, a little grainy, with petals of dust drifting down
+    'Watercolor': {
+        PALETTE: 'Candy', BACKGROUND: 'Paper',
+        BLOOM: false, SUNRAYS: false, SHADING: false, BLUR: 15, SATURATION: 42, CONTRAST: 45, FILTER: true,
+        VISCOSITY: 40, CURL: 10, GRAVITY: 10, SPLAT_RADIUS: 0.35, DENSITY_DISSIPATION: pctFadeTo(90), VELOCITY_DISSIPATION: 0.6,
+        PARTICLES: true, PARTICLE_STYLE: 'Dust', PARTICLE_AMOUNT: 'Medium', PARTICLE_COLOR_MODE: 'Single Color',
+        PARTICLE_COLOR: { r: 255, g: 150, b: 190 }, PARTICLE_SIZE: 25, PARTICLE_SPEED: 20, PARTICLE_DRAG: 70, PARTICLE_FADE: 20, PARTICLE_GLOW: 0,
+    },
+    // A star tearing itself apart: bursts go off white-hot and cool through orange and red to a violet afterglow
+    'Supernova': {
+        PALETTE: 'Fire', BACKGROUND: 'Ember',
+        SIM_MODE: 'Explosion', CURL: 35, DENSITY_DISSIPATION: pctFadeTo(65), VELOCITY_DISSIPATION: 0.5, EDGE: 'Void',
+        AGE_COLORS: true, AGE_COLOR_COUNT: 5, AGE_COLOR_TIME: 70, AGE_COLOR_SHARPNESS: 15,
+        AGE_COLOR_1: { r: 255, g: 240, b: 200 }, AGE_COLOR_2: { r: 255, g: 180, b: 40 }, AGE_COLOR_3: { r: 255, g: 60, b: 30 },
+        AGE_COLOR_4: { r: 150, g: 30, b: 120 }, AGE_COLOR_5: { r: 40, g: 30, b: 120 },
+        BLOOM_INTENSITY: 1.2, BLOOM_THRESHOLD: 0.5, GLOW_INTENSITY: 30, FLARE: true, FLARE_STYLE: 'Cinematic',
+        GAMMA: true, GAMMA_MODE: 'Cinematic',
+        PARTICLES: true, PARTICLE_STYLE: 'Sparks', PARTICLE_AMOUNT: 'Very High', PARTICLE_COLOR_MODE: 'Temperature-Based',
+        PARTICLE_PUSH: 70, PARTICLE_SPEED: 65, PARTICLE_FADE: 45,
+    },
+    // Chrome: heavy, springy blobs that mirror their surroundings, bend the light and bounce off the edges
+    'Mercury': {
+        PALETTE: 'Ice', BACKGROUND: 'Charcoal',
+        VISCOSITY: 60, CURL: 8, SPLAT_RADIUS: 0.5, ELASTICITY: 35, TRAILS: true, VELOCITY_DISSIPATION: 0.3,
+        SHADING: true, SPECULAR: true, SPECULAR_STYLE: 'Sharp', REFLECTION: 70, REFRACTION: 30, DEPTH: 45,
+        SATURATION: 25, CONTRAST: 60, BLOOM_THRESHOLD: 0.7,
+        EDGE: 'Repel', EDGE_BOUNCE: 40, REPEL_STRENGTH: 60, REPEL_DISTANCE: 12, CORNER: 'Rounded',
+    },
 };
 
 const PRESET_SPACES = 10;   // how many presets of your own fit before one has to be replaced

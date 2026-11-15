@@ -16,6 +16,14 @@
   - **Ripple when the screen wakes** and **Colors follow the battery**: a ring of color when the
     screen wakes or the charger goes in; a nearly flat battery warms the colors, charging pulls
     them toward green.
+- Eight new built-in presets, each built around a different side of the engine: **Molten Gold**
+  (thick liquid metal with wet highlights and depth), **Abyss** (glowing bubbles rising through
+  deep water under shafts of light), **Mandala** (an eight-fold kaleidoscope that drifts through
+  the palettes), **Storm Cell** (crackling icy plasma with sparks and a trembling screen),
+  **Pixel Arcade** (chunky pixels and neon rainbow bursts that wrap around the screen),
+  **Watercolor** (pigment bleeding into grainy paper with petals of dust), **Supernova** (bursts
+  that cool from white-hot through red to a violet afterglow) and **Mercury** (heavy chrome blobs
+  that mirror their surroundings and bounce off the edges).
 
 ## 1.0.4
 

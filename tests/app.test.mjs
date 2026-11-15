@@ -401,6 +401,31 @@ describe('presets', () => {
         app.run('redo()');
         assert.equal(app.run('config.CURL'), 3);
     });
+
+    test('ships fourteen built-in looks, every one valid and different', () => {
+        start({ storage: WELCOMED });
+        app.frames(2);
+        const builtin = JSON.parse(app.run('JSON.stringify(Object.keys(BUILTIN_PRESETS))'));
+        assert.deepEqual(builtin, [
+            'Default', 'Aurora Dream', 'Lava Lamp', 'Neon Party', 'Ink on Paper', 'Starry Galaxy',
+            'Molten Gold', 'Abyss', 'Mandala', 'Storm Cell', 'Pixel Arcade', 'Watercolor', 'Supernova', 'Mercury',
+        ]);
+        const seen = new Set();
+        builtin.forEach(name => {
+            const values = JSON.parse(app.run('JSON.stringify(BUILTIN_PRESETS[' + JSON.stringify(name) + '])'));
+            const cleaned = JSON.parse(app.run('JSON.stringify(cleanValues(BUILTIN_PRESETS[' + JSON.stringify(name) + ']))'));
+            assert.deepEqual(cleaned, values, name + ': every key exists and every value is in range');
+            assert.ok(!('SOUND' in values) && !('TILT' in values), name + ': never asks for a permission on its own');
+            const key = JSON.stringify(values);
+            assert.ok(!seen.has(key), name + ' is not a copy of another preset');
+            seen.add(key);
+            app.run('selectPreset(' + JSON.stringify(name) + ', true)');
+            app.frames(3);
+            assert.equal(app.run('presetState.current'), name);
+            assert.match(app.run('presetPreview(' + JSON.stringify(name) + ')'), /gradient/);
+        });
+        assert.deepEqual(app.errors, []);
+    });
 });
 
 describe('navigation', () => {
