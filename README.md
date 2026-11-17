@@ -4,7 +4,7 @@ Paint with living fluid. RIPPL Studio is an interactive WebGL fluid simulation, 
 
 <img src="screenshot.jpg" width="880">
 
-**Web:** https://t-sv30.github.io/RIPPL-Studio/ (installable, works offline) · **Privacy:** [policy](https://t-sv30.github.io/RIPPL-Studio/privacy.html) · **Changes:** [CHANGELOG.md](CHANGELOG.md)
+**Web:** https://t-sv30.github.io/RIPPL-Studio/ (installable, works offline; on iPhone open it in Safari and choose Share > Add to Home Screen) · **Privacy:** [policy](https://t-sv30.github.io/RIPPL-Studio/privacy.html) · **Changes:** [CHANGELOG.md](CHANGELOG.md)
 
 ## Using it
 
@@ -16,7 +16,7 @@ Drag anywhere to stir the fluid; several fingers work at once. The dock at the b
 | Random | New palette, background, motion and symmetry in one tap | R |
 | Controls | Opens the sheet with every setting | |
 | Freeze | Stops the motion; you can still paint on the frozen image | F or P |
-| Capture | Saves an image (to the gallery in the app, as a download in a browser) | |
+| Capture | Saves an image (to the gallery in the app, through the share sheet on iPhone, as a download in other browsers) | |
 
 In the Controls sheet, drag the handle to resize it or flick it down to close. While you move a slider the sheet turns see-through so you can watch the fluid change. The eye icon hides every control; tap the small arrow at the bottom (or press Back / Esc / H) to bring them back. Undo and redo sit at the top of the sheet.
 

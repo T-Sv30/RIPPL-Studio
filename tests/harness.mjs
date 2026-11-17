@@ -62,13 +62,38 @@ function fake2D () {
 
 // url: the address the app is opened at (the wallpaper page is the app with ?wallpaper=1)
 // battery: { level (0..1), charging } makes the browser report a battery; app.battery(level, charging) changes it later
-export function boot ({ native = false, storage = {}, deviceMemory, gl = {}, url = 'https://localhost/', battery = null } = {}) {
+// ios: Safari on an iPhone. motionAnswer is what it says when asked for the motion sensor
+// ('granted', 'denied', or 'needs-tap' to refuse because the question came outside a tap);
+// share: true makes the browser offer to share files
+export function boot ({ native = false, storage = {}, deviceMemory, gl = {}, url = 'https://localhost/', battery = null,
+    ios = false, motionAnswer = 'granted', standalone = false, share = false } = {}) {
     const dom = new JSDOM(read('index.html'), { url, runScripts: 'outside-only' });
     const { window } = dom;
     // A phone, so the tests exercise the mobile defaults on any machine
     Object.defineProperty(window.navigator, 'userAgent', {
-        value: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36',
+        value: ios
+            ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1'
+            : 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36',
     });
+    const motionRequests = [];
+    if (ios) {
+        window.DeviceMotionEvent = function DeviceMotionEvent () {};
+        window.DeviceMotionEvent.requestPermission = () => {
+            motionRequests.push(motionAnswer);
+            return motionAnswer === 'needs-tap' ? Promise.reject(new Error('NotAllowedError')) : Promise.resolve(motionAnswer);
+        };
+        if (standalone) Object.defineProperty(window.navigator, 'standalone', { value: true });
+    } else {
+        // Chrome on Android can vibrate and go fullscreen
+        window.navigator.vibrate = () => true;
+        Object.defineProperty(window.document, 'fullscreenEnabled', { value: true });
+        window.document.documentElement.requestFullscreen = () => Promise.resolve();
+    }
+    const shared = [];
+    if (share) {
+        window.navigator.canShare = () => true;
+        window.navigator.share = data => { shared.push(data); return Promise.resolve(); };
+    }
     // Gigabytes of memory the device reports (browsers round it; some report nothing)
     if (deviceMemory != null) Object.defineProperty(window.navigator, 'deviceMemory', { value: deviceMemory });
     const errors = [];
@@ -129,6 +154,8 @@ export function boot ({ native = false, storage = {}, deviceMemory, gl = {}, url
         document: window.document,
         errors,
         nativeCalls,
+        motionRequests,
+        shared,
         // Reads or runs anything in the app's global scope
         run: code => script(code, 'test-snippet.js'),
         userAgent: () => window.navigator.userAgent,

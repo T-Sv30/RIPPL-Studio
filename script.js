@@ -1137,8 +1137,13 @@ function wakeRipple () {
     }
 }
 
+// Safari (and so every iPhone browser) can't read the battery
+function canWatchBattery () {
+    return typeof navigator.getBattery === 'function';
+}
+
 function watchBattery () {
-    if (!navigator.getBattery) return;
+    if (!canWatchBattery()) return;
     navigator.getBattery().then(m => {
         const sync = () => { battery.has = true; battery.level = m.level; battery.charging = m.charging; };
         sync();
@@ -1271,6 +1276,7 @@ const motion = {
     shakeEnergy: 0,
     shakeArmed: true,
     bursts: 0,
+    permission: 'unknown',   // iPhone asks before handing out readings: 'asking', 'granted' or 'denied'
 };
 
 function screenAngle () {
@@ -1291,10 +1297,16 @@ function toScreen (x, y) {
     }
 }
 
+// iPhones report gravity pointing the other way from Android phones
+function gravitySign () {
+    return platform.isIOS ? -1 : 1;
+}
+
 function onDeviceMotion (e) {
     const g = e.accelerationIncludingGravity;
     if (g && typeof g.x === 'number' && typeof g.y === 'number') {
-        const [sx, sy] = toScreen(g.x, g.y);
+        const k = gravitySign();
+        const [sx, sy] = toScreen(g.x * k, g.y * k);
         const len = Math.hypot(sx, sy);
         motion.amount = Math.min(1, len / 9.8);
         if (len > 0.5) {
@@ -1322,14 +1334,35 @@ function syncMotionListener () {
     motion.listening = want;
     if (want) window.addEventListener('devicemotion', onDeviceMotion);
     else window.removeEventListener('devicemotion', onDeviceMotion);
+    // A look that tilts was opened without a tap (a saved look, or the first start): ask at the next tap
+    if (want && motionNeedsAsking()) platform.onNextGesture(askForMotion);
 }
 
-// Some browsers (iOS) only hand out motion readings after the user agrees
+function motionNeedsAsking () {
+    const DM = window.DeviceMotionEvent;
+    return motion.permission === 'unknown' && !WALLPAPER_MODE && !!DM && typeof DM.requestPermission === 'function';
+}
+
+// Some browsers (iOS) only hand out motion readings after the user agrees, and only ask during a tap
 function askForMotion () {
+    if (!motionNeedsAsking()) return;
+    motion.permission = 'asking';
+    let asked;
     try {
-        const DM = window.DeviceMotionEvent;
-        if (DM && typeof DM.requestPermission === 'function') DM.requestPermission().catch(() => {});
-    } catch (e) { /* nothing to ask */ }
+        asked = window.DeviceMotionEvent.requestPermission();
+    } catch (e) {
+        motion.permission = 'unknown';
+        return;
+    }
+    Promise.resolve(asked).then(answer => {
+        motion.permission = answer === 'granted' ? 'granted' : 'denied';
+        if (motion.permission === 'denied' && wantsMotion())
+            showToast('Motion not allowed · tilt and shake won’t work');
+    }, () => {
+        // Asked outside a tap: try again at the next one
+        motion.permission = 'unknown';
+        if (wantsMotion()) platform.onNextGesture(askForMotion);
+    });
 }
 
 function updateMotion (dt) {
@@ -3215,6 +3248,19 @@ function clearFluid () {
     gl.clearColor(0, 0, 0, 1);
 }
 
+// iPhone Safari can't make a page fullscreen; a page opened from the Home Screen already is
+function canFullscreen () {
+    return !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+}
+
+function showAddToHomeScreen () {
+    openModal({
+        title: 'Full screen on iPhone',
+        text: 'Safari can’t hide its bars for a web page, but RIPPL Studio opens full screen from your Home Screen. In Safari, tap Share, then “Add to Home Screen”, and open RIPPL Studio from its new icon. It works offline too.',
+        buttons: [{ label: 'OK', primary: true }],
+    });
+}
+
 function isFullscreen () {
     return !!(document.fullscreenElement || document.webkitFullscreenElement);
 }
@@ -4209,7 +4255,7 @@ function buildTabs () {
         ctl.toggle('FOLLOW_THEME', 'Lighter in light mode'),
         ctl.heading('Phone'),
         ctl.toggle('WAKE_RIPPLE', 'Ripple when the screen wakes'),
-        ctl.toggle('BATTERY_TINT', 'Colors follow the battery'),
+        ...(canWatchBattery() ? [ctl.toggle('BATTERY_TINT', 'Colors follow the battery')] : []),
     ];
 
     const touch = [
@@ -4466,17 +4512,20 @@ function buildTabs () {
         ctl.toggle('WALLPAPER_CLEAR', 'Start fresh when you come back'),
         ctl.action('Hide the controls', () => window.RipplUI.setHidden(true),
             'Shows only the fluid. Tap the small arrow at the bottom to bring the controls back.', { icon: 'hide' }),
-        ...(platform.isNative ? [] : [ctl.action('Fullscreen', toggleFullscreen, 'Fills the whole screen, hiding the browser.', { icon: 'expand' })]),
+        ...(!platform.isNative && canFullscreen() ? [ctl.action('Fullscreen', toggleFullscreen, 'Fills the whole screen, hiding the browser.', { icon: 'expand' })] : []),
+        ...(platform.isIOS && !platform.isNative && !platform.isStandalone
+            ? [ctl.action('Full screen on iPhone', showAddToHomeScreen, 'Add RIPPL Studio to your Home Screen to open it without the browser bars.', { icon: 'expand' })]
+            : []),
         platform.isNative
             ? ctl.action('Set as live wallpaper', useAsWallpaper, 'Puts the look on screen now behind your home screen, as a moving wallpaper you can touch.', { icon: 'phone' })
             : ctl.action('Use as a live desktop background', useAsWallpaper, 'Makes a link to this look that a desktop wallpaper app can show as a moving background.', { icon: 'phone' }),
     ];
 
     const app = [
-        { type: 'toggle', label: 'Haptic feedback',
+        ...(platform.hasHaptics ? [{ type: 'toggle', label: 'Haptic feedback',
           help: 'A light vibration when you tap a control.',
           get: () => deviceSettings.HAPTICS,
-          set: v => { deviceSettings.HAPTICS = v; platform.setHaptics(v); } },
+          set: v => { deviceSettings.HAPTICS = v; platform.setHaptics(v); } }] : []),
         { type: 'toggle', label: 'Keep the screen on',
           help: 'Stops the screen from dimming or locking while RIPPL Studio is open.',
           get: () => deviceSettings.KEEP_AWAKE, set: setKeepAwake },

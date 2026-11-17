@@ -1205,3 +1205,108 @@ describe('reacts to the world', () => {
         assert.deepEqual(app.errors, []);
     });
 });
+
+describe('iPhone', () => {
+    const wait = async () => { for (let i = 0; i < 5; i++) await app.settle(); };
+    const tilt = (x, y) => {
+        const ev = new app.window.Event('devicemotion');
+        Object.defineProperty(ev, 'accelerationIncludingGravity', { value: { x, y, z: 0 } });
+        Object.defineProperty(ev, 'acceleration', { value: { x: 0, y: 0, z: 0 } });
+        app.window.dispatchEvent(ev);
+    };
+    const buttons = () => app.$$('.rs-body .rs-btn').map(b => b.textContent);
+    const tap = () => app.document.body.dispatchEvent(new app.window.MouseEvent('click', { bubbles: true }));
+
+    test('only offers what Safari on an iPhone can do', () => {
+        start({ ios: true, storage: WELCOMED });
+        openTab('System', 'App');
+        assert.ok(!visibleRows().includes('Haptic feedback'), 'an iPhone web page cannot vibrate');
+        assert.ok(visibleRows().includes('Keep the screen on'));
+        openTab('Scene', 'Reacts to');
+        assert.ok(!visibleRows().includes('Colors follow the battery'), 'Safari cannot read the battery');
+        assert.ok(visibleRows().includes('Tilt sets gravity'));
+        openTab('System', 'Capture');
+        assert.ok(!buttons().includes('Fullscreen'), 'Safari cannot make a page fullscreen');
+        app.click(app.$$('.rs-body .rs-btn').find(b => b.textContent === 'Full screen on iPhone'));
+        assert.match(app.$('#modal-text').textContent, /Add to Home Screen/);
+        assert.deepEqual(app.errors, []);
+    });
+
+    test('opened from the Home Screen, it is already full screen', () => {
+        start({ ios: true, standalone: true, storage: WELCOMED });
+        openTab('System', 'Capture');
+        assert.ok(!buttons().includes('Full screen on iPhone'));
+    });
+
+    test('Android keeps haptics, the battery and fullscreen', () => {
+        start({ storage: WELCOMED });
+        openTab('System', 'App');
+        assert.ok(visibleRows().includes('Haptic feedback'));
+        openTab('System', 'Capture');
+        assert.ok(buttons().includes('Fullscreen'));
+        assert.ok(!buttons().includes('Full screen on iPhone'));
+    });
+
+    test('tilting pours the same way as on Android, though the iPhone reports gravity flipped', () => {
+        start({ ios: true, storage: WELCOMED });
+        app.run('config.TILT = true; config.GRAVITY = 50');
+        app.frames(1);
+        // Upright: an iPhone reads -9.8 along its y axis
+        tilt(0, -9.8);
+        app.frames(5);
+        let g = app.run('gravityVector()');
+        assert.ok(g.y < -100 && Math.abs(g.x) < 1, 'pulls down the screen: ' + JSON.stringify(g));
+        // Leaning onto its right side
+        tilt(-9.8, 0);
+        app.frames(20);
+        g = app.run('gravityVector()');
+        assert.ok(g.x < -100 && Math.abs(g.y) < 20, 'pulls toward the right side: ' + JSON.stringify(g));
+        assert.deepEqual(app.errors, []);
+    });
+
+    test('a saved look that tilts asks for the motion sensor at the first tap, not before', async () => {
+        start({ ios: true, storage: WELCOMED });
+        app.run('config.TILT = true');
+        app.frames(2);
+        assert.equal(app.motionRequests.length, 0, 'Safari only asks during a tap');
+        tap();
+        await wait();
+        assert.deepEqual(app.motionRequests, ['granted']);
+        assert.equal(app.run('motion.permission'), 'granted');
+        tap();
+        await wait();
+        assert.equal(app.motionRequests.length, 1, 'asks once');
+    });
+
+    test('switching tilt on asks straight away, and a refusal is explained', async () => {
+        start({ ios: true, motionAnswer: 'denied', storage: WELCOMED });
+        openTab('Scene', 'Reacts to');
+        app.click(row('Tilt sets gravity'));
+        await wait();
+        assert.deepEqual(app.motionRequests, ['denied']);
+        assert.match(app.$('#toast').textContent, /Motion not allowed/);
+        app.frames(2);
+        tap();
+        await wait();
+        assert.equal(app.motionRequests.length, 1, 'does not keep asking after a no');
+    });
+
+    test('a question Safari turned away is asked again at the next tap', async () => {
+        start({ ios: true, motionAnswer: 'needs-tap', storage: WELCOMED });
+        app.run('config.TILT = true; askForMotion()');
+        await wait();
+        assert.equal(app.run('motion.permission'), 'unknown');
+        tap();
+        await wait();
+        assert.equal(app.motionRequests.length, 2);
+    });
+
+    test('Save image hands the picture to the share sheet, which can put it in Photos', async () => {
+        start({ ios: true, share: true, storage: WELCOMED });
+        app.run('captureScreenshot()');
+        await wait();
+        assert.equal(app.shared.length, 1);
+        assert.match(app.shared[0].files[0].name, /\.png$/);
+        assert.deepEqual(app.errors, []);
+    });
+});

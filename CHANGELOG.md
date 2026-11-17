@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+- **iPhone and iPad**: the web version now works properly in Safari.
+  - Tilt and shake ask for the motion sensor at your first tap, as Safari requires, and tilting
+    pours the fluid the right way (iPhones report gravity flipped compared with Android).
+  - Sound reactive starts listening at your first tap when it was switched on before the app opened.
+  - Save image opens the share sheet, so "Save Image" puts the picture in Photos.
+  - Settings an iPhone can't use (haptic feedback, colors that follow the battery, Fullscreen)
+    are hidden. In their place, Capture explains how to add RIPPL Studio to the Home Screen,
+    where it opens full screen and works offline.
+  - A proper Home Screen icon, no "Save image" menu on a long press, and no enlarged text in
+    landscape.
+
 ## 1.0.6
 
 ### Changes
