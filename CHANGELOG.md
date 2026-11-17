@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.6
 
 ### Changes
 - New built-in preset **RGB Swirls**: fast, springy swirls that drift out from the middle and off
