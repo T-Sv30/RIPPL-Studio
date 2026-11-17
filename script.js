@@ -2788,13 +2788,16 @@ function refreshPresetList () {
     if (window.RipplUI) window.RipplUI.refreshPresets();
 }
 
+const FIRST_LOOK = 'RGB Swirls';   // what a fresh install opens with, before any preset has been chosen
+
 // Restores the last preset used on this device; runs once everything is initialized
 function initPresets () {
     DEFAULT_VALUES = snapshotValues();
     loadStoredPresets();
     const saved = storeGet('fluidfix.currentPreset');
     try {
-        if (saved && saved !== 'Default' && presetNames().indexOf(saved) !== -1) selectPreset(saved, true);
+        if (!saved) selectPreset(FIRST_LOOK, true);
+        else if (saved !== 'Default' && presetNames().indexOf(saved) !== -1) selectPreset(saved, true);
         else selectPreset('Default', false);
     } catch (e) {
         console.warn('Could not restore the last preset; starting from Default', e);
@@ -2889,6 +2892,24 @@ const BUILTIN_PRESETS = {
         SHADING: true, SPECULAR: true, SPECULAR_STYLE: 'Sharp', REFLECTION: 70, REFRACTION: 30, DEPTH: 45,
         SATURATION: 25, CONTRAST: 60, BLOOM_THRESHOLD: 0.7,
         EDGE: 'Repel', EDGE_BOUNCE: 40, REPEL_STRENGTH: 60, REPEL_DISTANCE: 12, CORNER: 'Rounded',
+    },
+    // Fast, springy swirls that drift out from the middle and off the edges, glowing like glass and
+    // sweeping slowly through the rainbow; the phone's tilt pours them to one side
+    'RGB Swirls': {
+        PALETTE: 'Sunset', BACKGROUND: 'Black', BG_BRIGHTNESS: 68, RAINBOW: true, RAINBOW_SPEED: 0.02,
+        SPEED: 1.4, INTENSITY: 0.14, DENSITY_DISSIPATION: pctFadeTo(47), VELOCITY_DISSIPATION: 0.21,
+        PRESSURE: 0.93, PRESSURE_LEVEL: 'Low', CURL: 38, SPLAT_RADIUS: 0.26,
+        VISCOSITY: 25, TURBULENCE: 50, SWIRL: 75, BUOYANCY: 48, ELASTICITY: 81, RANDOMNESS: 23,
+        FLOW_DIRECTION: 'Radial Outward', FLOW_SPEED: 21, EDGE: 'Void', EDGE_SOFTNESS: 0,
+        GESTURE: 'Swirl', INJECTION: 'Random', RANDOM_INJECTION: true, AUTOPLAY: true, CONTINUOUS_DRAWING: true,
+        TOUCH_RADIUS: 100, TOUCH_SENSITIVITY: 100, TOUCH_ATTRACTION: 50, TOUCH_REPULSION: 15, MULTI_TOUCH: 85,
+        BLOOM: false, BLOOM_INTENSITY: 0, SUNRAYS: false, GLOW_INTENSITY: 76, GLOW_RADIUS: 100,
+        FLARE: true, FLARE_STYLE: 'Cinematic', DEPTH: 51, REFLECTION: 100, REFRACTION: 18, TRANSPARENCY: 49,
+        SATURATION: 86, CONTRAST: 67, COLOR_VARIATION: 64,
+        PARTICLES: true, PARTICLE_STYLE: 'Dust', PARTICLE_AMOUNT: 'Medium', PARTICLE_INTENSITY: 25, PARTICLE_GLOW: 61,
+        PARTICLE_SIZE: 25, PARTICLE_LENGTH: 25, PARTICLE_DENSITY: 50, PARTICLE_SPREAD: 21, PARTICLE_PUSH: 78,
+        PARTICLE_TURBULENCE: 51, PARTICLE_FADE: 75,
+        TILT: true, TILT_STRENGTH: 100, WAKE_RIPPLE: true,
     },
 };
 
