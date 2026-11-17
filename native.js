@@ -8,6 +8,13 @@
     const isNative = !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform() &&
                         typeof cap.nativePromise === 'function');
 
+    // iPhone and iPad (iPadOS reports itself as a Mac, but a Mac has no touch screen)
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    // Opened from the home screen rather than in a browser tab
+    const isStandalone = navigator.standalone === true ||
+                         !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+
     function call (plugin, method, options) {
         if (!isNative) return Promise.reject(new Error('Not running in the app'));
         return cap.nativePromise(plugin, method, options || {});
@@ -18,6 +25,8 @@
     let hapticsEnabled = true;
     const HAPTIC_STYLES = { light: 'LIGHT', medium: 'MEDIUM', heavy: 'HEAVY' };
     const HAPTIC_MS = { light: 8, medium: 16, heavy: 28 };
+    // Safari on iPhone can't vibrate from a web page
+    const hasHaptics = isNative || typeof navigator.vibrate === 'function';
 
     function haptic (kind) {
         if (!hapticsEnabled) return;
@@ -63,6 +72,8 @@
     // Saves a PNG. Resolves with 'saved' (in the gallery), 'shared' (share sheet shown),
     // 'downloaded' (browser download) or 'cancelled'.
     function saveImage (blob, filename) {
+        // On iPhone a download lands in Files; the share sheet's "Save Image" puts it in Photos
+        if (!isNative && isIOS) return shareFile(blob, filename, 'RIPPL Studio');
         if (!isNative) {
             download(blob, filename);
             return Promise.resolve('downloaded');
@@ -149,6 +160,19 @@
         call('SystemBars', on ? 'hide' : 'show', {}).catch(() => {});
     }
 
+    // ---------- User gestures ----------
+
+    // Runs fn once, during the next tap or key press. Safari only starts sound and only asks for
+    // the motion sensor from inside one.
+    function onNextGesture (fn) {
+        const events = ['touchend', 'click', 'keydown'];
+        const run = () => {
+            events.forEach(name => document.removeEventListener(name, run, true));
+            try { fn(); } catch (e) { console.error(e); }
+        };
+        events.forEach(name => document.addEventListener(name, run, true));
+    }
+
     // ---------- Microphone ----------
 
     // Opens the microphone for listening (nothing is recorded). Resolves with a listener:
@@ -167,7 +191,12 @@
                 analyser.fftSize = 2048;
                 analyser.smoothingTimeConstant = 0.5;
                 context.createMediaStreamSource(stream).connect(analyser);
-                if (typeof context.resume === 'function') context.resume().catch(() => {});
+                if (typeof context.resume === 'function') {
+                    context.resume().catch(() => {});
+                    // Opened without a tap (a saved look, or coming back to the app), Safari keeps the
+                    // sound paused until the next one
+                    if (context.state !== 'running') onNextGesture(() => context.resume().catch(() => {}));
+                }
                 return {
                     bands: analyser.frequencyBinCount,
                     bandHz: context.sampleRate / analyser.fftSize,
@@ -200,6 +229,10 @@
 
     window.RipplNative = {
         isNative,
+        isIOS,
+        isStandalone,
+        hasHaptics,
+        onNextGesture,
         haptic,
         setHaptics (on) { hapticsEnabled = !!on; },
         saveImage,

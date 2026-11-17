@@ -37,6 +37,12 @@
     -webkit-user-select: none;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;    /* no iPhone "Save image" menu on a long press */
+}
+
+html {
+    -webkit-text-size-adjust: 100%;  /* iPhone Safari enlarges text in landscape otherwise */
+    text-size-adjust: 100%;
 }
 
 html, body {

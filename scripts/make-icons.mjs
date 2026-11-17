@@ -163,6 +163,7 @@ write('icons/icon-192.png', 192, { shape: 'rounded', span: FRAME });
 write('icons/icon-512.png', 512, { shape: 'rounded', span: FRAME });
 write('icons/maskable-512.png', 512, { shape: 'full', span: INSIDE });      // the device cuts its own shape from this
 write('icons/store-icon-512.png', 512, { shape: 'full', span: 1 });         // Google Play listing icon
+write('icons/apple-touch-icon.png', 180, { shape: 'full', span: INSIDE });  // iPhone Home Screen: opaque, iOS rounds the corners
 
 // Android app (skipped until the android project exists)
 const res = 'android/app/src/main/res';
