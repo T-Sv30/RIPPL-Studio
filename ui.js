@@ -642,6 +642,9 @@
         ui.expanded = expanded;
         const view = window.innerHeight || 800;
         ui.sheet.style.setProperty('--rs-sheet-h', Math.round(view * (expanded ? 1 : 0.62)) + 'px');
+        // ResizeObserver catches this where it exists; elsewhere the bar is redrawn now (no animation)
+        // and again when the height animation ends
+        if (ui.scroll) ui.scroll.refreshScroll();
     }
 
     function pushHistory () {
@@ -721,6 +724,7 @@
             if (c.visible && !panel.search) b.el.hidden = !c.visible();
             if (b.update && !b.el.hidden) b.update();
         });
+        if (ui.scroll) ui.scroll.refreshScroll();   // rows may have appeared or gone
     }
 
     function refreshPresets () {
@@ -792,6 +796,82 @@
         return b;
     }
 
+    // A scrollbar we draw ourselves, so it stays visible on phones (Android and iOS only flash a thin
+    // overlay while you scroll). It appears only when the page is taller than the sheet. Drag the thumb
+    // to scroll, or tap the track to move a page. Screen readers keep using the body's own scrolling.
+    function scrollFrame (body) {
+        const thumb = h('div', { class: 'rs-thumb' });
+        const bar = h('div', { class: 'rs-scrollbar', 'aria-hidden': 'true' }, thumb);
+        const frame = h('div', { class: 'rs-scroll' }, body, bar);
+
+        // Scroll and resize events already arrive at most once a frame, so this runs straight away
+        function update () {
+            const view = body.clientHeight;
+            const full = body.scrollHeight;
+            const over = full - view > 1 && view > 0;
+            frame.classList.toggle('overflows', over);
+            if (!over) return;
+            const track = bar.clientHeight || view;
+            const size = Math.max(44, Math.round(track * view / full));   // at least a fingertip tall
+            const top = Math.round((track - size) * body.scrollTop / (full - view));
+            thumb.style.height = size + 'px';
+            thumb.style.transform = 'translateY(' + top + 'px)';
+        }
+
+        // Size changes wait a frame: update() toggles the lane padding, which resizes the body again, and
+        // doing that inside a ResizeObserver callback makes the browser report a loop. Waiting also lets the
+        // sheet's own resize handler set its new height before we measure.
+        let queued = 0;
+        const later = () => {
+            if (!queued) queued = window.requestAnimationFrame(() => { queued = 0; update(); });
+        };
+
+        body.addEventListener('scroll', update, { passive: true });
+        window.addEventListener('resize', later);
+        if (window.ResizeObserver) {
+            const sizes = new ResizeObserver(later);
+            sizes.observe(body);
+            const watch = () => Array.from(body.children).forEach(c => sizes.observe(c));
+            watch();
+            if (window.MutationObserver) new MutationObserver(() => { watch(); later(); }).observe(body, { childList: true });
+        }
+
+        let grab = null;
+        thumb.addEventListener('pointerdown', e => {
+            grab = { y: e.clientY, top: body.scrollTop };
+            if (thumb.setPointerCapture) { try { thumb.setPointerCapture(e.pointerId); } catch (err) { /* pointer already gone */ } }
+            frame.classList.add('scrubbing');
+            e.preventDefault();
+            e.stopPropagation();
+        });
+        thumb.addEventListener('pointermove', e => {
+            if (!grab) return;
+            // A mouse moving with no button down was released somewhere we never heard about
+            if (e.pointerType === 'mouse' && e.buttons === 0) { release(); return; }
+            const room = bar.clientHeight - thumb.offsetHeight;
+            if (room <= 0) return;
+            body.scrollTop = grab.top + (e.clientY - grab.y) * (body.scrollHeight - body.clientHeight) / room;
+        });
+        function release () {
+            if (!grab) return;
+            grab = null;
+            frame.classList.remove('scrubbing');
+        }
+        // Letting go off the thumb only reaches it while it holds pointer capture, which can fail or be
+        // lost, so the window and lostpointercapture end the drag too
+        ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(type => thumb.addEventListener(type, release));
+        ['pointerup', 'pointercancel'].forEach(type => window.addEventListener(type, release));
+        bar.addEventListener('pointerdown', e => {
+            if (e.target !== bar) return;
+            const r = thumb.getBoundingClientRect();
+            const page = body.clientHeight * 0.85;
+            body.scrollBy({ top: e.clientY < r.top ? -page : page, behavior: 'smooth' });
+        });
+
+        frame.refreshScroll = update;
+        return frame;
+    }
+
     function buildSheet () {
         const o = ui.opts;
         const grab = h('div', { class: 'rs-grab', 'aria-hidden': 'true' });
@@ -838,7 +918,8 @@
 
         ui.subtabs = h('div', { class: 'rs-subtabs', role: 'tablist', 'aria-label': 'Section', hidden: true });
         ui.body = h('div', { class: 'rs-body' });
-        const sheet = h('section', { class: 'rs-sheet', role: 'dialog', 'aria-label': 'Controls' }, grab, head, ui.searchBar, tabs, ui.subtabs, ui.body);
+        ui.scroll = scrollFrame(ui.body);
+        const sheet = h('section', { class: 'rs-sheet', role: 'dialog', 'aria-label': 'Controls' }, grab, head, ui.searchBar, tabs, ui.subtabs, ui.scroll);
 
         // Drag the handle to resize, or flick it down to close
         let drag = null;
@@ -868,6 +949,9 @@
         };
         grab.addEventListener('pointerup', endDrag);
         grab.addEventListener('pointercancel', endDrag);
+        sheet.addEventListener('transitionend', e => {
+            if (e.target === sheet && e.propertyName === 'height') ui.scroll.refreshScroll();
+        });
 
         return sheet;
     }
