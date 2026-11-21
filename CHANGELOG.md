@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.7
 
 ### Changes
 - **Scrollbar in the controls**: long pages now show a scrollbar that stays visible on phones.
