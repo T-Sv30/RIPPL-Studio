@@ -336,14 +336,96 @@ body.sheet-open .rs-dock {
     gap: var(--rs-s2);
 }
 
+.rs-scroll {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
 .rs-body {
     flex: 1;
+    min-width: 0;
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: var(--rs-s2) 0 calc(var(--rs-s5) + var(--rs-bottom));
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+    scrollbar-width: none;   /* .rs-scrollbar replaces it, so it shows on phones too */
+}
+
+.rs-body::-webkit-scrollbar {
+    display: none;
+}
+
+/* Leave a lane for the bar. With the rows' own 16px of margin and padding, that clears the 44px
+   thumb, so grabbing it never lands on a slider or switch. */
+.rs-scroll.overflows .rs-body {
+    padding-right: 28px;
+}
+
+.rs-scrollbar {
+    position: absolute;
+    top: var(--rs-s2);
+    right: 0;
+    bottom: calc(var(--rs-s2) + var(--rs-bottom));
+    width: 28px;
+    display: none;
+    touch-action: none;
+}
+
+.rs-scroll.overflows .rs-scrollbar {
+    display: block;
+}
+
+.rs-scrollbar::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 5px;
+    width: 4px;
+    border-radius: 2px;
+    background: var(--rs-line);
+}
+
+.rs-thumb {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 44px;
+    cursor: grab;
+}
+
+/* The visible thumb is thin; the 44px column around it is what your finger catches */
+.rs-thumb::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 4px;
+    width: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.35);
+    transition: background 0.15s ease, right 0.15s ease, width 0.15s ease;
+}
+
+.rs-scroll.scrubbing .rs-thumb {
+    cursor: grabbing;
+}
+
+.rs-scroll.scrubbing .rs-thumb::before {
+    right: 3px;
+    width: 8px;
+    background: var(--rs-cyan);
+}
+
+/* Only where hover is real: phones keep :hover after a tap, which would leave the thumb lit */
+@media (hover: hover) {
+    .rs-thumb:hover::before {
+        right: 3px;
+        width: 8px;
+        background: var(--rs-cyan);
+    }
 }
 
 .rs-panel {
@@ -916,6 +998,7 @@ body.sheet-open .rs-dock {
 .rs-sheet.peek .rs-search,
 .rs-sheet.peek .rs-tabs,
 .rs-sheet.peek .rs-subtabs,
+.rs-sheet.peek .rs-scrollbar,
 .rs-sheet.peek .rs-panel > *:not(.active) {
     opacity: 0;
 }
@@ -930,6 +1013,7 @@ body.sheet-open .rs-dock {
 .rs-search,
 .rs-tabs,
 .rs-subtabs,
+.rs-scrollbar,
 .rs-panel > * {
     transition: opacity 0.18s ease;
 }

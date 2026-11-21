@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Changes
+- **Scrollbar in the controls**: long pages now show a scrollbar that stays visible on phones.
+  Drag the thumb to scroll or tap the track to move a page. It hides while a slider is being
+  dragged, so you can still see the fluid.
 - **iPhone and iPad**: the web version now works properly in Safari.
   - Tilt and shake ask for the motion sensor at your first tap, as Safari requires, and tilting
     pours the fluid the right way (iPhones report gravity flipped compared with Android).

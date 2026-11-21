@@ -277,6 +277,102 @@ describe('finding your way', () => {
     });
 });
 
+describe('scrolling the controls', () => {
+    // jsdom has no layout, so give the controls body the sizes a phone would report
+    function fakeSizes (body, view, full) {
+        Object.defineProperty(body, 'clientHeight', { configurable: true, get: () => view });
+        Object.defineProperty(body, 'scrollHeight', { configurable: true, get: () => full });
+        const bar = app.$('.rs-scrollbar');
+        Object.defineProperty(bar, 'clientHeight', { configurable: true, get: () => view });
+    }
+
+    test('a page taller than the sheet gets a scrollbar that follows it', () => {
+        start({ storage: WELCOMED });
+        openTab('Color');
+        const body = app.$('.rs-body');
+        const frame = app.$('.rs-scroll');
+        assert.equal(app.$('.rs-scrollbar').getAttribute('aria-hidden'), 'true', 'screen readers use the real scrolling');
+        fakeSizes(body, 400, 1600);
+        body.scrollTop = 600;
+        body.dispatchEvent(new app.window.Event('scroll'));
+        assert.ok(frame.classList.contains('overflows'));
+        const thumb = app.$('.rs-thumb');
+        assert.equal(thumb.style.height, '100px', 'the thumb is the share of the page you can see');
+        assert.equal(thumb.style.transform, 'translateY(150px)', 'and sits where you are on the page');
+    });
+
+    test('a page that fits has no scrollbar', () => {
+        start({ storage: WELCOMED });
+        openTab('Color');
+        const body = app.$('.rs-body');
+        fakeSizes(body, 400, 1600);
+        body.dispatchEvent(new app.window.Event('scroll'));
+        fakeSizes(body, 400, 380);
+        app.click(app.$$('.rs-tab').find(t => t.textContent === 'Presets'));
+        assert.ok(!app.$('.rs-scroll').classList.contains('overflows'));
+    });
+
+    test('expanding or shrinking the sheet redraws the bar, even without ResizeObserver', () => {
+        start({ storage: WELCOMED });
+        openTab('Color');
+        const body = app.$('.rs-body');
+        fakeSizes(body, 400, 700);
+        body.dispatchEvent(new app.window.Event('scroll'));
+        assert.ok(app.$('.rs-scroll').classList.contains('overflows'));
+        const grab = app.$('.rs-grab');
+        const tap = type => grab.dispatchEvent(new app.window.PointerEvent(type, { bubbles: true, pointerId: 2, clientY: 50 }));
+        fakeSizes(body, 800, 700);   // a tap on the handle expands the sheet, and now everything fits
+        tap('pointerdown');
+        tap('pointerup');
+        assert.ok(!app.$('.rs-scroll').classList.contains('overflows'), 'redrawn as soon as the height is set');
+        fakeSizes(body, 400, 700);
+        const end = new app.window.Event('transitionend');
+        end.propertyName = 'height';
+        app.$('.rs-sheet').dispatchEvent(end);
+        assert.ok(app.$('.rs-scroll').classList.contains('overflows'), 'and again when the height animation ends');
+    });
+
+    // Open a long page and press the thumb: 1200px of scrolling over 300px of track, so 1px moved is 4px scrolled
+    function grabThumb (pointerType) {
+        start({ storage: WELCOMED });
+        openTab('Color');
+        const body = app.$('.rs-body');
+        const thumb = app.$('.rs-thumb');
+        fakeSizes(body, 400, 1600);
+        Object.defineProperty(thumb, 'offsetHeight', { configurable: true, get: () => 100 });
+        body.dispatchEvent(new app.window.Event('scroll'));
+        const pointer = (el, type, clientY, buttons) => el.dispatchEvent(new app.window.PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType, clientY, buttons }));
+        pointer(thumb, 'pointerdown', 100, 1);
+        pointer(thumb, 'pointermove', 125, 1);
+        assert.equal(body.scrollTop, 100, 'dragging the thumb scrolls the page');
+        assert.ok(app.$('.rs-scroll').classList.contains('scrubbing'));
+        return { body, thumb, pointer };
+    }
+
+    test('letting go off the thumb ends the drag', () => {
+        const { body, thumb, pointer } = grabThumb('touch');
+        pointer(app.$('.rs-body'), 'pointerup', 300, 0);
+        assert.ok(!app.$('.rs-scroll').classList.contains('scrubbing'));
+        pointer(thumb, 'pointermove', 200, 1);
+        assert.equal(body.scrollTop, 100, 'a later move over the thumb does not scroll');
+    });
+
+    test('losing the pointer ends the drag', () => {
+        const { body, thumb, pointer } = grabThumb('touch');
+        pointer(thumb, 'lostpointercapture', 125, 0);
+        pointer(thumb, 'pointermove', 200, 1);
+        assert.equal(body.scrollTop, 100);
+    });
+
+    test('a mouse back over the thumb with no button pressed is not still dragging', () => {
+        // The button came up outside the window, so no pointerup ever arrived
+        const { body, thumb, pointer } = grabThumb('mouse');
+        pointer(thumb, 'pointermove', 200, 0);
+        assert.equal(body.scrollTop, 100);
+        assert.ok(!app.$('.rs-scroll').classList.contains('scrubbing'));
+    });
+});
+
 describe('presets', () => {
     const cards = () => app.$$('.rs-preset .rs-preset-name').map(n => n.textContent);
     const action = label => app.$$('.rs-actions .rs-btn').find(b => b.textContent === label);
