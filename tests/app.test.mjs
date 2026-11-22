@@ -373,6 +373,44 @@ describe('scrolling the controls', () => {
     });
 });
 
+describe('scenes', () => {
+    test('every moving scene keeps adding color, with sensible numbers, for as long as it runs', () => {
+        start({ storage: WELCOMED });
+        const report = JSON.parse(app.run(`(() => {
+            const still = ['Standard Fluid', 'Reverse Flow', 'Vortex'];   // the fluid alone, or a driver of their own
+            const out = {};
+            SIM_MODE_NAMES.filter(n => !still.includes(n)).forEach(name => {
+                applySimMode(name);
+                let dye = 0, bad = 0;
+                for (let i = 0; i < 600; i++) {   // ten seconds at the emitters' 60 steps a second
+                    updateSimMode(1 / 60);
+                    dye += splatQueue.dye.length / 6;
+                    [splatQueue.velocity, splatQueue.dye, effectQueue.velocity, effectQueue.dye]
+                        .forEach(q => { bad += q.filter(v => !Number.isFinite(v)).length; q.length = 0; });
+                }
+                out[name] = { dye, bad };
+            });
+            return JSON.stringify(out);
+        })()`));
+        const names = Object.keys(report);
+        assert.ok(names.length >= 23, names.length + ' moving scenes');
+        names.forEach(name => {
+            assert.ok(report[name].dye > 5, name + ' adds color');
+            assert.equal(report[name].bad, 0, name + ' only produces finite numbers');
+        });
+    });
+
+    test('each scene runs in the real loop without errors, and switching scenes forgets the last one', () => {
+        start({ storage: WELCOMED });
+        app.run('SIM_MODE_NAMES').forEach(name => {
+            app.run('applySimMode(' + JSON.stringify(name) + ')');
+            assert.equal(app.run('modeState.extra'), null, name + ' starts fresh');
+            app.frames(6);
+        });
+        assert.deepEqual(app.errors, []);
+    });
+});
+
 describe('presets', () => {
     const cards = () => app.$$('.rs-preset .rs-preset-name').map(n => n.textContent);
     const action = label => app.$$('.rs-actions .rs-btn').find(b => b.textContent === label);

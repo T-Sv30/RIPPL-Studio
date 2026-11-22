@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+- **Twelve new scenes** in Scene › Mode, each moving on its own:
+  - **Northern Lights**: glowing curtains ripple and drift across the sky.
+  - **Nebula**: soft clouds of color bloom among twinkling stars.
+  - **Lotus**: two flowers of light trace their petals over and over.
+  - **Pulsar**: a spinning star sweeps out spiral beams and pulses with shockwaves.
+  - **Ink Drops**: drops of ink fall and unfurl into curling tendrils.
+  - **Fireflies**: little lights drift and blink in the dark.
+  - **Harmonograph**: a swinging pen draws looping curves that slowly die away, then starts anew.
+  - **Twin Vortices**: two whirlpools circle each other and wind their colors together.
+  - **Silk**: three ribbons braid around each other as they flow past.
+  - **Rain on a Pond**: raindrops spread rings of ripples.
+  - **Solar Flare**: a glowing sun throws arcs of fire that loop back to its surface.
+  - **Blossoms**: flowers open one after another, each petal curling outward.
+
 ## 1.0.7
 
 ### Changes
