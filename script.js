@@ -3047,8 +3047,11 @@ function applyValues (values, fromDefaults) {
     setPalette(config.PALETTE, 0.8);
     updateKeywords();
     onEdgeChange();
+    // Undo, redo, presets and the wallpaper look can change the scene here, so forget all of the last scene's state
     modeState.t = 0;
+    modeState.timer = 0;
     modeState.prev = [];
+    modeState.extra = null;
     textState.dirty = true;
     refreshGUI();
 }
