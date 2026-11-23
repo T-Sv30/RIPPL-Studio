@@ -17,7 +17,7 @@ It's a toy, a sketchpad and a way to unwind, all in one.
 PAINT WITH PHYSICS
 • A real-time fluid simulation that reacts to every touch, with multi-touch
 • 8 gesture modes: push, pull, swirl, attract, repel, inject, erase and vortex
-• 14 scenes that move on their own: Whirlpool, Tornado, Fountain, Galaxy, Black Hole and more
+• 26 scenes that move on their own: Northern Lights, Nebula, Pulsar, Fireflies, Galaxy, Black Hole and more
 • Gravity, buoyancy, turbulence, force fields and four kinds of screen edges
 
 MAKE IT YOURS

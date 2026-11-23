@@ -2268,11 +2268,24 @@ const SIM_MODES = {
     'Plasma':         { TURBULENCE: 70, CURL: 50, VELOCITY_DISSIPATION: 0.3 },
     'Galaxy':         { FORCE_FIELD: 'Vortex', FIELD_STRENGTH: 45, CURL: 25 },
     'Black Hole':     { FORCE_FIELD: 'Spiral', FIELD_STRENGTH: 85, CURL: 20 },
+    'Northern Lights': { FLOW_DIRECTION: 'Right', FLOW_SPEED: 12, EDGE: 'Wrap', BUOYANCY: 60, CURL: 12, VELOCITY_DISSIPATION: 0.5 },
+    'Nebula':         { TURBULENCE: 30, CURL: 22, VELOCITY_DISSIPATION: 0.6 },
+    'Lotus':          { CURL: 12, VELOCITY_DISSIPATION: 0.5 },
+    'Pulsar':         { CURL: 25, VELOCITY_DISSIPATION: 0.4 },
+    'Ink Drops':      { GRAVITY: 35, TURBULENCE: 8, CURL: 45, VELOCITY_DISSIPATION: 0.15 },
+    'Fireflies':      { TURBULENCE: 15, CURL: 10, VELOCITY_DISSIPATION: 1.2 },
+    'Harmonograph':   { CURL: 5, VELOCITY_DISSIPATION: 0.8 },
+    'Twin Vortices':  { CURL: 35, VELOCITY_DISSIPATION: 0.3 },
+    'Silk':           { FLOW_DIRECTION: 'Right', FLOW_SPEED: 20, EDGE: 'Wrap', CURL: 8, VELOCITY_DISSIPATION: 0.4 },
+    'Rain on a Pond': { CURL: 4, VELOCITY_DISSIPATION: 0.9, DENSITY_DISSIPATION: pctFadeTo(70) },
+    'Solar Flare':    { FORCE_FIELD: 'Attractor', FIELD_STRENGTH: 25, CURL: 18 },
+    'Blossoms':       { CURL: 15, VELOCITY_DISSIPATION: 0.6 },
     'Reverse Flow':   {},
 };
 const SIM_MODE_NAMES = Object.keys(SIM_MODES);
 
-const modeState = { t: 0, timer: 0, prev: [] };
+// extra holds whatever a scene needs to remember between frames (ripples waiting to spread, a curve's shape)
+const modeState = { t: 0, timer: 0, prev: [], extra: null };
 
 function applySimMode (name) {
     if (!has(SIM_MODES, name)) return;
@@ -2281,6 +2294,7 @@ function applySimMode (name) {
     modeState.t = 0;
     modeState.timer = 0;
     modeState.prev = [];
+    modeState.extra = null;
     onEdgeChange();
     refreshGUI();
 }
@@ -2295,6 +2309,13 @@ function cycleSimMode () {
 function centeredToUV (px, py) {
     const ar = canvas.width / canvas.height;
     return [px / ar + 0.5, py + 0.5];
+}
+
+// Runs fn with every splat scaled in size, for fine points of light or broad soft clouds
+function withSize (scale, fn) {
+    const keep = splatRadiusScale;
+    splatRadiusScale = keep * scale;
+    try { fn(); } finally { splatRadiusScale = keep; }
 }
 
 // Emitter that remembers its last position so it can push fluid along its own path
@@ -2442,6 +2463,223 @@ function updateSimMode (dt) {
                 emitSplat(x, y, -Math.sin(a) * 900 * F, Math.cos(a) * 900 * F, colorAt(Math.random()), 3);
             }
             pointEffect(0.5, 0.5, { fade: Math.min(1, 6 * sdt), velocityFade: Math.min(1, 2 * sdt), area: 1.2 });
+            break;
+        }
+        case 'Northern Lights': {
+            // Curtains of light: thin rays rise from a band that folds and ripples, and the flow carries them along
+            withSize(0.55, () => {
+                for (let k = 0; k < 4; k++) {
+                    const x = frac(k / 4 + t * 0.045 + 0.03 * Math.sin(t * 0.7 + k));
+                    const fold = Math.sin(x * Math.PI * 3 + t * 0.4) * 0.07 + Math.sin(x * Math.PI * 7 - t * 0.9) * 0.025;
+                    const y = 0.58 + fold;
+                    const shimmer = 0.6 + 0.4 * Math.sin(t * 3.1 + x * 19);
+                    emitSplat(x, y, Math.cos(x * Math.PI * 5 + t) * 120 * F, (260 + 160 * shimmer) * F,
+                              colorAt(0.3 + 0.22 * Math.sin(x * Math.PI * 2 + t * 0.15)), 0.32 * shimmer);
+                }
+            });
+            if (modeState.timer <= 0) {
+                // Now and then a ripple runs along the curtain
+                modeState.timer = 0.5 + Math.random() * 0.6;
+                const x = Math.random();
+                splatVelocity(x, 0.6, (Math.random() < 0.5 ? -1 : 1) * 500 * F, 0, 2.5);
+            }
+            break;
+        }
+        case 'Nebula': {
+            // Broad, soft clouds drifting around the middle, sprinkled with stars that twinkle out
+            if (modeState.timer <= 0) {
+                modeState.timer = 0.22 + Math.random() * 0.25;
+                const x = 0.5 + 0.28 * Math.sin(t * 0.13) * Math.cos(t * 0.07 + 1.3) / Math.max(1, ar) + (Math.random() - 0.5) * 0.25;
+                const y = 0.5 + 0.28 * Math.cos(t * 0.11 + 0.4) + (Math.random() - 0.5) * 0.25;
+                const a = Math.random() * Math.PI * 2;
+                withSize(2.4, () => emitSplat(x, y, Math.cos(a) * 160 * F, Math.sin(a) * 160 * F,
+                                              colorAt(0.5 + 0.5 * Math.sin(t * 0.05) + Math.random() * 0.2), 1.1));
+            }
+            if (Math.random() < 10 * sdt) {
+                withSize(0.15, () => emitSplat(Math.random(), Math.random(), 0, 0, colorAt(Math.random()), 5));
+            }
+            break;
+        }
+        case 'Lotus': {
+            // Two rose curves, a large three-petal one and a small five-petal one turning the other way
+            const R = 0.36 * mind * (0.88 + 0.12 * Math.sin(t * 0.3));
+            const roses = [
+                { k: 3, r: R, speed: 1.5, turn: t * 0.08, color: 0.08 },
+                { k: 5, r: R * 0.5, speed: -1.1, turn: -t * 0.13, color: 0.58 },
+            ];
+            withSize(0.6, () => roses.forEach((rose, i) => {
+                const th = t * rose.speed;
+                const r = rose.r * Math.cos(rose.k * th);
+                const a = th + rose.turn;
+                const [x, y] = centeredToUV(Math.cos(a) * r, Math.sin(a) * r);
+                trackedEmit(i, x, y, colorAt(rose.color + 0.12 * Math.sin(th * 0.5)), 0.55, 1.6);
+            }));
+            if (modeState.timer <= 0) {
+                modeState.timer = 0.25;
+                emitSplat(0.5, 0.5, 0, 0, colorAt(0.33), 0.8);
+            }
+            break;
+        }
+        case 'Pulsar': {
+            // Two beams from a spinning core curl into spiral arms; every few seconds the star breathes in, then bursts
+            const a = t * 1.3;
+            for (let k = 0; k < 2; k++) {
+                const b = a + Math.PI * k;
+                const [x, y] = centeredToUV(Math.cos(b) * 0.03, Math.sin(b) * 0.03);
+                emitSplat(x, y, Math.cos(b) * 1300 * F, Math.sin(b) * 1300 * F, colorAt(0.55 + k * 0.1), 0.5);
+            }
+            if (!modeState.extra) modeState.extra = { pulse: 3 };
+            const p = modeState.extra;
+            p.pulse -= sdt;
+            if (p.pulse < 0.8) pointEffect(0.5, 0.5, { radial: -1500 * F * sdt, area: 3 });   // breathing in
+            if (p.pulse <= 0) {
+                p.pulse = 4 + Math.random() * 2;
+                for (let i = 0; i < 24; i++) {
+                    const c = (Math.PI * 2 * i) / 24;
+                    const [x, y] = centeredToUV(Math.cos(c) * 0.04, Math.sin(c) * 0.04);
+                    emitSplat(x, y, Math.cos(c) * 1700 * F, Math.sin(c) * 1700 * F, colorAt(0.05 + i / 24 * 0.2), 1.4);
+                }
+                emitSplat(0.5, 0.5, 0, 0, colorAt(0.9), 4);
+            }
+            break;
+        }
+        case 'Ink Drops': {
+            // A drop falls in, sinks, and its edges roll up into tendrils
+            if (modeState.timer <= 0) {
+                modeState.timer = 0.8 + Math.random() * 0.8;
+                const x = 0.2 + Math.random() * 0.6;
+                withSize(0.7, () => emitSplat(x, 0.88, (Math.random() - 0.5) * 120 * F, -800 * F, colorAt(Math.random()), 2.4));
+            }
+            break;
+        }
+        case 'Fireflies': {
+            // Each light wanders its own slow path and glows in short, soft blinks
+            withSize(0.28, () => {
+                for (let k = 0; k < 9; k++) {
+                    const s = k * 1.93 + 0.4;
+                    const x = 0.5 + 0.38 * Math.sin(t * (0.21 + 0.03 * k) + s) + 0.07 * Math.sin(t * (0.9 + 0.1 * k) + s * 2.1);
+                    const y = 0.5 + 0.36 * Math.cos(t * (0.17 + 0.025 * k) + s * 1.7) + 0.07 * Math.cos(t * (0.8 + 0.12 * k) + s);
+                    const glow = Math.pow(Math.max(0, Math.sin(t * (0.9 + 0.17 * k) + s * 3)), 6);
+                    if (glow < 0.05) { modeState.prev[k] = { x, y }; continue; }   // dark: move on without leaving a mark
+                    trackedEmit(k, x, y, colorAt(0.1 + k * 0.035), 2.4 * glow, 0.7);
+                }
+            });
+            break;
+        }
+        case 'Harmonograph': {
+            // Two damped pendulums per axis, tuned close to simple ratios, so the curve drifts as it shrinks
+            if (!modeState.extra || t - modeState.extra.start > 26) {
+                const ratios = [[2, 3], [3, 4], [1, 2], [3, 5], [2, 5]];
+                const [m, n] = ratios[Math.floor(Math.random() * ratios.length)];
+                const base = 1.1 + Math.random() * 0.5;
+                const tune = () => (Math.random() - 0.5) * 0.03;
+                modeState.extra = {
+                    start: t,
+                    f: [m * base + tune(), n * base + tune(), n * base + tune(), m * base + tune()],
+                    p: [0, 1, 2, 3].map(() => Math.random() * Math.PI * 2),
+                    hue: Math.random(),
+                };
+                modeState.prev = [];
+            }
+            const h = modeState.extra;
+            const tau = t - h.start;
+            const amp = 0.34 * mind * Math.exp(-tau * 0.07);
+            const px = amp * (Math.sin(h.f[0] * tau + h.p[0]) + Math.sin(h.f[1] * tau + h.p[1])) / 2;
+            const py = amp * (Math.sin(h.f[2] * tau + h.p[2]) + Math.sin(h.f[3] * tau + h.p[3])) / 2;
+            const [x, y] = centeredToUV(px, py);
+            withSize(0.45, () => trackedEmit(0, x, y, colorAt(h.hue + tau * 0.02), 0.6, 1.2));
+            break;
+        }
+        case 'Twin Vortices': {
+            // Two eddies turning the same way orbit each other; a pen on each rim feeds them color
+            const a = t * 0.45;
+            const d = 0.17 * mind;
+            for (let k = 0; k < 2; k++) {
+                const b = a + Math.PI * k;
+                const cx = Math.cos(b) * d, cy = Math.sin(b) * d;
+                const [ex, ey] = centeredToUV(cx, cy);
+                pointEffect(ex, ey, { tangential: 2400 * F * sdt, area: 5 });
+                const c = t * 2.6 + k * Math.PI;
+                const [x, y] = centeredToUV(cx + Math.cos(c) * 0.06 * mind, cy + Math.sin(c) * 0.06 * mind);
+                trackedEmit(k, x, y, colorAt(k * 0.5 + t * 0.015), 0.6, 2);
+            }
+            break;
+        }
+        case 'Silk': {
+            // Three pens at the left edge weave up and down out of step; the flow draws them out into a braid
+            withSize(0.5, () => {
+                for (let k = 0; k < 3; k++) {
+                    const ph = t * 0.9 + (Math.PI * 2 * k) / 3;
+                    const y = 0.5 + 0.2 * Math.sin(ph);
+                    emitSplat(0.08, y, 320 * F, Math.cos(ph) * 180 * F, colorAt(k / 3 + t * 0.01), 0.5);
+                }
+            });
+            break;
+        }
+        case 'Rain on a Pond': {
+            // Each drop sends out a ring, then a fainter second ring from the same spot
+            if (!modeState.extra) modeState.extra = [];
+            const rings = modeState.extra;
+            if (modeState.timer <= 0) {
+                modeState.timer = 0.35 + Math.random() * 0.5;
+                const drop = { x: 0.1 + Math.random() * 0.8, y: 0.1 + Math.random() * 0.8, color: colorAt(Math.random() * 0.35 + t * 0.01) };
+                rings.push(Object.assign({ wait: 0, strength: 1 }, drop), Object.assign({ wait: 0.4, strength: 0.5 }, drop));
+            }
+            for (let i = rings.length - 1; i >= 0; i--) {
+                const r = rings[i];
+                r.wait -= sdt;
+                if (r.wait > 0) continue;
+                rings.splice(i, 1);
+                withSize(0.35, () => {
+                    for (let j = 0; j < 14; j++) {
+                        const c = (Math.PI * 2 * j) / 14;
+                        const x = r.x + Math.cos(c) * 0.012 / ar, y = r.y + Math.sin(c) * 0.012;
+                        emitSplat(x, y, Math.cos(c) * 520 * F * r.strength, Math.sin(c) * 520 * F * r.strength, r.color, 0.8 * r.strength);
+                    }
+                });
+            }
+            break;
+        }
+        case 'Solar Flare': {
+            // A rotating ring of light makes the sun's disc; flares leap off its edge and the pull of the
+            // centre bends them back into loops
+            const R = 0.16 * mind;
+            for (let k = 0; k < 3; k++) {
+                const a = t * 0.35 + (Math.PI * 2 * k) / 3;
+                const [x, y] = centeredToUV(Math.cos(a) * R, Math.sin(a) * R);
+                emitSplat(x, y, -Math.sin(a) * 200 * F, Math.cos(a) * 200 * F, colorAt(0.05 + 0.1 * k), 0.45);
+            }
+            if (!modeState.extra) modeState.extra = [];
+            const flares = modeState.extra;
+            if (modeState.timer <= 0) {
+                modeState.timer = 0.7 + Math.random() * 0.9;
+                flares.push({ a: Math.random() * Math.PI * 2, life: 0.45, side: Math.random() < 0.5 ? -1 : 1, color: colorAt(0.1 + Math.random() * 0.25) });
+            }
+            for (let i = flares.length - 1; i >= 0; i--) {
+                const f = flares[i];
+                f.life -= sdt;
+                if (f.life <= 0) { flares.splice(i, 1); continue; }
+                const [x, y] = centeredToUV(Math.cos(f.a) * R * 1.05, Math.sin(f.a) * R * 1.05);
+                const dir = f.a + f.side * 0.55;
+                withSize(0.6, () => emitSplat(x, y, Math.cos(dir) * 1300 * F, Math.sin(dir) * 1300 * F, f.color, 1.1));
+            }
+            break;
+        }
+        case 'Blossoms': {
+            // A ring of petals pushed outward at once; each push curls up at its tip like a petal
+            if (modeState.timer <= 0) {
+                modeState.timer = 1.6 + Math.random() * 1.2;
+                const cx = 0.22 + Math.random() * 0.56, cy = 0.22 + Math.random() * 0.56;
+                const n = 5 + Math.floor(Math.random() * 4);
+                const turn = Math.random() * Math.PI * 2;
+                const base = Math.random();
+                for (let i = 0; i < n; i++) {
+                    const c = turn + (Math.PI * 2 * i) / n;
+                    emitSplat(cx + Math.cos(c) * 0.015 / ar, cy + Math.sin(c) * 0.015, Math.cos(c) * 750 * F, Math.sin(c) * 750 * F,
+                              colorAt(base + i / n * 0.12), 1.6);
+                }
+                withSize(0.5, () => emitSplat(cx, cy, 0, 0, colorAt(base + 0.5), 2.5));
+            }
             break;
         }
     }
@@ -2809,8 +3047,11 @@ function applyValues (values, fromDefaults) {
     setPalette(config.PALETTE, 0.8);
     updateKeywords();
     onEdgeChange();
+    // Undo, redo, presets and the wallpaper look can change the scene here, so forget all of the last scene's state
     modeState.t = 0;
+    modeState.timer = 0;
     modeState.prev = [];
+    modeState.extra = null;
     textState.dirty = true;
     refreshGUI();
 }
@@ -4047,6 +4288,18 @@ const OPTION_HELP = {
         'Plasma': 'crackling arcs in turbulence.',
         'Galaxy': 'two spiral arms around a bright core.',
         'Black Hole': 'clouds spiral inward and vanish.',
+        'Northern Lights': 'glowing curtains ripple and drift across the sky.',
+        'Nebula': 'soft clouds of color bloom among twinkling stars.',
+        'Lotus': 'two flowers of light trace their petals over and over.',
+        'Pulsar': 'a spinning star sweeps out spiral beams and pulses with shockwaves.',
+        'Ink Drops': 'drops of ink fall and unfurl into curling tendrils.',
+        'Fireflies': 'little lights drift and blink in the dark.',
+        'Harmonograph': 'a swinging pen draws looping curves that slowly die away, then starts anew.',
+        'Twin Vortices': 'two whirlpools circle each other and wind their colors together.',
+        'Silk': 'three ribbons braid around each other as they flow past.',
+        'Rain on a Pond': 'raindrops spread rings of ripples.',
+        'Solar Flare': 'a glowing sun throws arcs of fire that loop back to its surface.',
+        'Blossoms': 'flowers open one after another, each petal curling outward.',
         'Reverse Flow': 'the fluid moves against your finger.',
     },
     GESTURE: {

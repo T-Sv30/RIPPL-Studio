@@ -373,6 +373,99 @@ describe('scrolling the controls', () => {
     });
 });
 
+describe('scenes', () => {
+    test('every moving scene keeps adding color, with sensible numbers, for as long as it runs', () => {
+        start({ storage: WELCOMED });
+        const report = JSON.parse(app.run(`(() => {
+            const still = ['Standard Fluid', 'Reverse Flow', 'Vortex'];   // the fluid alone, or a driver of their own
+            const out = {};
+            SIM_MODE_NAMES.filter(n => !still.includes(n)).forEach(name => {
+                applySimMode(name);
+                let dye = 0, bad = 0;
+                for (let i = 0; i < 600; i++) {   // ten seconds at the emitters' 60 steps a second
+                    updateSimMode(1 / 60);
+                    dye += splatQueue.dye.length / 6;
+                    [splatQueue.velocity, splatQueue.dye, effectQueue.velocity, effectQueue.dye]
+                        .forEach(q => { bad += q.filter(v => !Number.isFinite(v)).length; q.length = 0; });
+                }
+                out[name] = { dye, bad };
+            });
+            return JSON.stringify(out);
+        })()`));
+        const names = Object.keys(report);
+        assert.ok(names.length >= 23, names.length + ' moving scenes');
+        names.forEach(name => {
+            assert.ok(report[name].dye > 5, name + ' adds color');
+            assert.equal(report[name].bad, 0, name + ' only produces finite numbers');
+        });
+    });
+
+    test('each scene runs in the real loop without errors, and switching scenes forgets the last one', () => {
+        start({ storage: WELCOMED });
+        app.run('SIM_MODE_NAMES').forEach(name => {
+            app.run('applySimMode(' + JSON.stringify(name) + ')');
+            assert.equal(app.run('modeState.extra'), null, name + ' starts fresh');
+            app.frames(6);
+        });
+        assert.deepEqual(app.errors, []);
+    });
+
+    test('undo, redo and presets that change the scene also forget the last one', () => {
+        start({ storage: WELCOMED });
+        // Scenes that keep their own state, each in a different shape
+        const stateful = ['Pulsar', 'Harmonograph', 'Rain on a Pond', 'Solar Flare'];
+        const report = JSON.parse(app.run(`(() => {
+            const out = [];
+            const names = ${JSON.stringify(stateful)};
+            names.forEach(a => names.forEach(b => {
+                if (a === b) return;
+                applySimMode(a);
+                for (let i = 0; i < 120; i++) updateSimMode(1 / 60);
+                applyValues(Object.assign(snapshotValues(), { SIM_MODE: b }), false);   // the path undo, redo and presets take
+                let error = null, bad = 0;
+                try {
+                    for (let i = 0; i < 120; i++) {
+                        updateSimMode(1 / 60);
+                        [splatQueue.velocity, splatQueue.dye, effectQueue.velocity, effectQueue.dye]
+                            .forEach(q => { bad += q.filter(v => !Number.isFinite(v)).length; q.length = 0; });
+                    }
+                } catch (e) { error = String(e); }
+                out.push({ from: a, to: b, error, bad });
+            }));
+            return JSON.stringify(out);
+        })()`));
+        report.forEach(r => {
+            const label = r.from + ' to ' + r.to;
+            assert.equal(r.error, null, label + ' runs without errors');
+            assert.equal(r.bad, 0, label + ' only produces finite numbers');
+        });
+
+        // And in the real loop, which stops for good if a scene throws
+        app.run(`applySimMode('Pulsar')`);
+        app.frames(5);
+        app.run(`applyValues(Object.assign(snapshotValues(), { SIM_MODE: 'Rain on a Pond' }), false)`);
+        app.frames(5);
+        assert.deepEqual(app.errors, []);
+    });
+
+    test('Harmonograph stays on screen after an undo late in its curve', () => {
+        start({ storage: WELCOMED });
+        const offset = app.run(`(() => {
+            applySimMode('Harmonograph');
+            for (let i = 0; i < 60 * 40; i++) updateSimMode(1 / 60);   // past its reseed at 26 seconds
+            applyValues(snapshotValues(), false);
+            let max = 0;
+            for (let i = 0; i < 60 * 5; i++) {
+                updateSimMode(1 / 60);
+                modeState.prev.forEach(p => { max = Math.max(max, Math.abs(p.x - 0.5), Math.abs(p.y - 0.5)); });
+            }
+            return max;
+        })()`);
+        assert.ok(offset > 0, 'the pen moves');
+        assert.ok(offset <= 0.5, 'the pen stays on screen, ' + offset.toFixed(2) + ' from the centre');
+    });
+});
+
 describe('presets', () => {
     const cards = () => app.$$('.rs-preset .rs-preset-name').map(n => n.textContent);
     const action = label => app.$$('.rs-actions .rs-btn').find(b => b.textContent === label);
