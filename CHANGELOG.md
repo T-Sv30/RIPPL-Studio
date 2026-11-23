@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.8
 
 ### Changes
 - **Twelve new scenes** in Scene › Mode, each moving on its own:
